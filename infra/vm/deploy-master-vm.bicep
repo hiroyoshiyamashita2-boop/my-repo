@@ -188,7 +188,7 @@ wmic computersystem where name="%computername%" set AutomaticManagedPagefile=Tru
 }
 
 //
-// ④ ✅ 再起動（1回だけ）
+// ④ 再起動（1回だけ）
 //
 resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RestartAfterPagingFix'
