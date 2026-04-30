@@ -127,28 +127,48 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 //
-//  OS 状態を必ず正す Custom Script Extension
-//  - ローカル管理者作成／再設定
-//  - ページングファイルの壊れたレジストリを直接修復
+//  OS 起動後前提・堅牢な Custom Script Extension
+//  - dependsOn 明示（vm / nic / osDisk）
+//  - 初期待機 + Windows サービス稼働待ち
+//  - ローカル管理者作成／更新
+//  - ページングファイル レジストリ直接修正
 //
 resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
   name: 'FixOsStateAlways'
   parent: vm
   location: location
+  dependsOn: [
+    vm
+    nic
+    osDisk
+  ]
   properties: {
     publisher: 'Microsoft.Compute'
     type: 'CustomScriptExtension'
     typeHandlerVersion: '1.10'
     autoUpgradeMinorVersion: true
+
     settings: {
       commandToExecute: $'''
 powershell -ExecutionPolicy Bypass -Command "
 
-# --- ローカル管理者ユーザー作成／更新 ---
+# --- 初期待機（VM Agent / OS 安定化） ---
+Start-Sleep -Seconds 30
+
+# --- OS 完全起動待ち（Azure VM Heartbeat サービス） ---
+Write-Output 'Waiting for Azure VM heartbeat service...'
+while ((Get-Service vmicheartbeat).Status -ne 'Running') {
+  Start-Sleep -Seconds 5
+}
+Write-Output 'OS is ready.'
+
+# --- ローカル管理者作成／再設定 ---
+$pwd = $env:ADMIN_PASSWORD
+
 if (-not (Get-LocalUser -Name '${adminUsername}' -ErrorAction SilentlyContinue)) {
-  net user ${adminUsername} ${adminPassword} /add
+  net user ${adminUsername} $pwd /add
 } else {
-  net user ${adminUsername} ${adminPassword}
+  net user ${adminUsername} $pwd
 }
 net localgroup Administrators ${adminUsername} /add
 
@@ -163,9 +183,13 @@ reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Ma
  /v TempPageFile `
  /f
 
-Write-Output 'Local user and paging file registry have been fixed successfully.'
+Write-Output 'OS state (user and paging file) fixed successfully.'
 "
 '''
+    }
+
+    protectedSettings: {
+      ADMIN_PASSWORD: adminPassword
     }
   }
 }
