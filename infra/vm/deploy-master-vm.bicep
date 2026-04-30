@@ -130,7 +130,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 //
-// ① 管理者パスワード再設定
+// ① 管理者パスワード再設定（ログイン安定化）
 //
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ResetMasterAdminPassword'
@@ -169,10 +169,10 @@ Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
 }
 
 //
-// ③ ページングファイル修正
+// ③ ページングファイルを自動管理に設定
 //
-resource fixPagingFile 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'FixPagingFile'
+resource setPagingAuto 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'SetPagingAuto'
   parent: vm
   location: location
   dependsOn: [
@@ -188,14 +188,33 @@ wmic computersystem where name="%computername%" set AutomaticManagedPagefile=Tru
 }
 
 //
-// ④ 再起動（1回だけ）
+// ④ 既存の壊れた pagefile 定義を完全削除
+//
+resource removePagingFile 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'RemovePagingFile'
+  parent: vm
+  location: location
+  dependsOn: [
+    setPagingAuto
+  ]
+  properties: {
+    source: {
+      script: $'''
+wmic pagefileset delete || exit /b 0
+'''
+    }
+  }
+}
+
+//
+// ⑤ 再起動（1回のみ）
 //
 resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RestartAfterPagingFix'
   parent: vm
   location: location
   dependsOn: [
-    fixPagingFile
+    removePagingFile
   ]
   properties: {
     source: {
