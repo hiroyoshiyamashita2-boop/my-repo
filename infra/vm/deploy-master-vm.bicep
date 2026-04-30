@@ -44,7 +44,8 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 }
 
 /*
- * OS Disk (Standard SSD LRS)
+ * OS Disk (Snapshot → Managed Disk)
+ * Storage: Standard SSD LRS
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -93,6 +94,9 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
       vmSize: vmSize
     }
 
+    /*
+     * Trusted Launch 設定
+     */
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -124,23 +128,20 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 
 /*
  * Windows Update 実行（Run Command）
- * VM 作成完了後に必ず実行される
+ * ※ script は string（配列不可）
  */
 resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RunWindowsUpdate'
   parent: vm
   location: location
-  dependsOn: [
-    vm
-  ]
   properties: {
     source: {
-      script: [
-        'Install-PackageProvider -Name NuGet -Force'
-        'Install-Module PSWindowsUpdate -Force'
-        'Import-Module PSWindowsUpdate'
-        'Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot'
-      ]
+      script: '''
+Install-PackageProvider -Name NuGet -Force
+Install-Module PSWindowsUpdate -Force
+Import-Module PSWindowsUpdate
+Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
+'''
     }
   }
 }
