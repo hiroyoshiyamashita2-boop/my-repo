@@ -10,11 +10,8 @@ param vmName string
 @description('Deployment date (YYYYMMDD)')
 param deployDate string
 
-@description('Admin username for Master VM')
-param adminUsername string = "avdlocaladmin"
-
 @secure()
-@description('Admin password for Master VM')
+@description('Admin password for Master VM (per-VM)')
 param adminPassword string
 
 @description('Virtual Machine size')
@@ -27,6 +24,7 @@ param vnetName string = 'P906VNJWPB01'
 param subnetName string = 'AVD-MNG-JW'
 
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
+var adminUsername = 'avdlocaladmin'
 
 /*
  * Existing Virtual Network
@@ -131,8 +129,9 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 /*
- * 管理者アカウントのパスワード再設定
- * (Portal の Reset password 相当)
+ * ✅ Master VM 用 管理者パスワード再設定
+ * Username 固定: avdlocaladmin
+ * Portal の「Reset password」と同等
  */
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ResetMasterAdminPassword'
@@ -141,8 +140,8 @@ resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-
   properties: {
     source: {
       script: '''
-net user ${adminUsername} ${adminPassword}
-net localgroup Administrators ${adminUsername} /add
+net user avdlocaladmin ${adminPassword}
+net localgroup Administrators avdlocaladmin /add
 '''
     }
   }
