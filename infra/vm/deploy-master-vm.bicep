@@ -7,6 +7,9 @@ param snapshotName string
 @description('Virtual Machine name')
 param vmName string
 
+@description('Deployment date (YYYYMMDD)')
+param deployDate string
+
 @description('Virtual Machine size')
 param vmSize string = 'Standard_D2s_v5'
 
@@ -15,6 +18,8 @@ param vnetName string = 'P906VNJWPB01'
 
 @description('Existing subnet name')
 param subnetName string = 'AVD-SH-JW'
+
+var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
 /*
  * Existing Virtual Network
@@ -32,30 +37,35 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing 
 }
 
 /*
- * Existing Snapshot
+ * Existing Snapshot (Gen2 / Trusted Launch 対応前提)
  */
-resource snapshot 'Microsoft.Compute/snapshots@2023-09-01' existing = {
+resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
 
 /*
  * OS Disk (Snapshot → Managed Disk)
+ * Storage: Standard SSD LRS
  */
-resource osDisk 'Microsoft.Compute/disks@2023-09-01' = {
-  name: '${vmName}-osdisk'
+resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
+  name: osDiskName
   location: location
+  sku: {
+    name: 'StandardSSD_LRS'
+  }
   properties: {
     creationData: {
       createOption: 'Copy'
       sourceResourceId: snapshot.id
     }
+    osType: 'Windows'
   }
 }
 
 /*
- * Network Interface (NSGなし)
+ * Network Interface
  */
-resource nic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
+resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
   name: '${vmName}-nic'
   location: location
   properties: {
@@ -74,17 +84,30 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-09-01' = {
 }
 
 /*
- * Virtual Machine
+ * Virtual Machine (Trusted Launch)
  */
-resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
+resource vm 'Microsoft.Compute/virtualMachines@2023-10-02' = {
   name: vmName
   location: location
   properties: {
     hardwareProfile: {
       vmSize: vmSize
     }
+
+    /*
+     * Trusted Launch 設定
+     */
+    securityProfile: {
+      securityType: 'TrustedLaunch'
+      uefiSettings: {
+        secureBootEnabled: true
+        vTpmEnabled: true
+      }
+    }
+
     storageProfile: {
       osDisk: {
+        name: osDiskName
         createOption: 'Attach'
         managedDisk: {
           id: osDisk.id
@@ -92,6 +115,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
         osType: 'Windows'
       }
     }
+
     networkProfile: {
       networkInterfaces: [
         {
