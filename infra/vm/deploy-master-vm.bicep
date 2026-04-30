@@ -19,7 +19,15 @@ param vnetName string = 'P906VNJWPB01'
 @description('Existing subnet name')
 param subnetName string = 'AVD-MNG-JW'
 
+@description('Existing local admin username (must already exist in snapshot)')
+param adminUsername string = 'avdlocaladmin'
+
+@secure()
+@description('New password for existing local admin user')
+param adminPassword string
+
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
+var logFilePath = 'C:\\Azure\\CustomScript\\fix-os-state.log'
 
 /*
  * Existing Virtual Network
@@ -45,7 +53,6 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 
 /*
  * OS Disk (Snapshot -> Managed Disk)
- * - Snapshot 作成時点のユーザー／パスワードを完全保持
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -85,8 +92,6 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 
 /*
  * Virtual Machine (Trusted Launch)
- * - OS ディスクは Attach
- * - osProfile は intentionally 未定義（Snapshot 状態を維持）
  */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
@@ -124,19 +129,14 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 
 /*
  * Custom Script Extension
- * - OS 起動安定化待機
- * - ページングファイル調整のみ
- * - ユーザー／パスワードは一切変更しない
+ * - パスワードリセット
+ * - ページングファイル調整
+ * - 実行ログを VM 内に永続保存
  */
 resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
-  name: 'FixOsStateAlways'
+  name: 'FixOsStateWithLogging'
   parent: vm
   location: location
-  dependsOn: [
-    vm
-    nic
-    osDisk
-  ]
   properties: {
     publisher: 'Microsoft.Compute'
     type: 'CustomScriptExtension'
@@ -147,17 +147,28 @@ resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-
       commandToExecute: '''
 powershell -ExecutionPolicy Bypass -Command "
 
-# --- 初期待機（VM Agent / OS 安定化） ---
+$logDir = 'C:\\Azure\\CustomScript'
+$logFile = '${logFilePath}'
+
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+Start-Transcript -Path $logFile -Append
+
+Write-Output '=== Fix OS State Script START ==='
+Write-Output \"Timestamp: $(Get-Date -Format u)\"
+
 Start-Sleep -Seconds 30
 
-# --- OS 完全起動待ち ---
 Write-Output 'Waiting for Azure VM heartbeat service...'
 while ((Get-Service vmicheartbeat).Status -ne 'Running') {
   Start-Sleep -Seconds 5
 }
 Write-Output 'OS is ready.'
 
-# --- ページングファイル調整のみ ---
+# --- パスワードリセット ---
+net user ${adminUsername} $env:ADMIN_PASSWORD
+Write-Output 'Password reset completed.'
+
+# --- ページングファイル設定 ---
 reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
  /v PagingFiles `
  /t REG_MULTI_SZ `
@@ -168,9 +179,16 @@ reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Ma
  /v TempPageFile `
  /f
 
-Write-Output 'OS state fixed. Existing users and passwords preserved.'
+Write-Output 'Paging file configuration updated.'
+Write-Output '=== Fix OS State Script END ==='
+
+Stop-Transcript
 "
 '''
+    }
+
+    protectedSettings: {
+      ADMIN_PASSWORD: adminPassword
     }
   }
 }
