@@ -6,12 +6,15 @@ on:
       resourceGroupName:
         description: 'Resource Group name'
         required: true
+        type: string
       snapshotName:
-        description: 'Snapshot name (e.g. PV906VMJW01-20260310-BeforeSysprep)'
+        description: 'Snapshot name (e.g. P906VMJW01-20260310-BeforeSysprep)'
         required: true
+        type: string
       location:
         description: 'Azure location'
         required: true
+        type: string
 
 jobs:
   deploy:
@@ -28,7 +31,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 3. 既存 VM の存在チェック（安全ガード）
+      # 3. 既存 VM の存在チェック（ガード）
       - name: Check existing VM
         shell: bash
         run: |
@@ -37,13 +40,12 @@ jobs:
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
           RESOURCE_GROUP="${{ inputs.resourceGroupName }}"
 
-          # スナップショット名の先頭（例: P906VMJW01）を抽出
+          # 先頭プレフィックスを VM 名として使用
           VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
           echo "Snapshot name      : ${SNAPSHOT_NAME}"
-          echo "VM base name check : ${VM_BASE_NAME}"
+          echo "VM name to check   : ${VM_BASE_NAME}"
 
-          # VM の存在確認
           if az vm show \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${VM_BASE_NAME}" \
@@ -55,8 +57,8 @@ jobs:
             echo "OK: VM '${VM_BASE_NAME}' does not exist. Continue."
           fi
 
-      # 4. Bicep による Master VM 作成
-      - name: Deploy Bicep
+      # 4. Bicep によるマスター VM 作成
+      - name: Deploy master VM with Bicep
         shell: bash
         run: |
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
@@ -64,7 +66,7 @@ jobs:
 
           az deployment group create \
             --resource-group "${{ inputs.resourceGroupName }}" \
-            --template-file main.bicep \
+            --template-file infra/vm/deploy-master-vm.bicep \
             --parameters \
               location="${{ inputs.location }}" \
               snapshotName="${{ inputs.snapshotName }}" \
