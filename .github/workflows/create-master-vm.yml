@@ -12,11 +12,14 @@ on:
         required: true
         type: string
       location:
-        description: 'Azure location'
+        description: 'Azure location (e.g. japanwest)'
+        required: true
+        type: string
+      deployDate:
+        description: 'Deployment date (YYYYMMDD)'
         required: true
         type: string
 
-# ✅ OIDC を利用するために必須
 permissions:
   id-token: write
   contents: read
@@ -26,11 +29,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. リポジトリをチェックアウト
+      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Azure にログイン（OIDC）
+      # 2. Azure Login (OIDC)
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -38,7 +41,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 3. 既存 VM の存在チェック（安全ガード）
+      # 3. 既存 VM の存在チェック
       - name: Check existing VM
         shell: bash
         run: |
@@ -47,7 +50,7 @@ jobs:
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
           RESOURCE_GROUP="${{ inputs.resourceGroupName }}"
 
-          # スナップショット名の先頭を VM 名として利用
+          # Snapshot 名の先頭を VM 名として利用
           VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
           echo "Snapshot name    : ${SNAPSHOT_NAME}"
@@ -64,7 +67,7 @@ jobs:
             echo "OK: VM '${VM_BASE_NAME}' does not exist. Continue."
           fi
 
-      # 4. Bicep によるマスター VM 作成
+      # 4. Bicep Deploy（外部から渡された deployDate を使用）
       - name: Deploy master VM with Bicep
         shell: bash
         run: |
@@ -77,4 +80,5 @@ jobs:
             --parameters \
               location="${{ inputs.location }}" \
               snapshotName="${{ inputs.snapshotName }}" \
-              vmName="${VM_BASE_NAME}"
+              vmName="${VM_BASE_NAME}" \
+              deployDate="${{ inputs.deployDate }}"
