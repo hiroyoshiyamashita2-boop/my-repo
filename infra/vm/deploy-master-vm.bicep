@@ -10,11 +10,11 @@ param vmName string
 @description('Deployment date (YYYYMMDD)')
 param deployDate string
 
-@description('Admin username for Master VM')
+@description('Local admin username')
 param adminUsername string = 'avdlocaladmin'
 
 @secure()
-@description('Admin password for Master VM (per-VM)')
+@description('Local admin password')
 param adminPassword string
 
 @description('Virtual Machine size')
@@ -29,23 +29,17 @@ param subnetName string = 'AVD-MNG-JW'
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
 /*
- * Existing Virtual Network
+ * Existing resources
  */
 resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
   name: vnetName
 }
 
-/*
- * Existing Subnet
- */
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
   parent: vnet
   name: subnetName
 }
 
-/*
- * Existing Snapshot
- */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
@@ -56,9 +50,7 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
   location: location
-  sku: {
-    name: 'StandardSSD_LRS'
-  }
+  sku: { name: 'StandardSSD_LRS' }
   properties: {
     creationData: {
       createOption: 'Copy'
@@ -79,9 +71,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
       {
         name: 'ipconfig1'
         properties: {
-          subnet: {
-            id: subnet.id
-          }
+          subnet: { id: subnet.id }
           privateIPAllocationMethod: 'Dynamic'
         }
       }
@@ -96,9 +86,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
   properties: {
-    hardwareProfile: {
-      vmSize: vmSize
-    }
+    hardwareProfile: { vmSize: vmSize }
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -110,9 +98,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
       osDisk: {
         name: osDiskName
         createOption: 'Attach'
-        managedDisk: {
-          id: osDisk.id
-        }
+        managedDisk: { id: osDisk.id }
         osType: 'Windows'
       }
     }
@@ -125,79 +111,44 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 //
-// ① 管理者パスワード再設定
+//  恒久修正用 Custom Script Extension
+//  - ローカル管理者作成／再設定
+//  - ページングファイルの壊れたレジストリを完全修復
 //
-resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'ResetAdmin'
+resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
+  name: 'FixOsStateAlways'
   parent: vm
   location: location
   properties: {
-    source: {
-      script: $'''
-net user ${adminUsername} ${adminPassword}
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    settings: {
+      commandToExecute: '''
+powershell -ExecutionPolicy Bypass -Command "
+
+# --- ローカル管理者作成／更新 ---
+if (-not (Get-LocalUser -Name '${adminUsername}' -ErrorAction SilentlyContinue)) {
+  net user ${adminUsername} ${adminPassword} /add
+} else {
+  net user ${adminUsername} ${adminPassword}
+}
 net localgroup Administrators ${adminUsername} /add
-'''
-    }
-  }
-}
 
-//
-// ② Windows Update
-//
-resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'WindowsUpdate'
-  parent: vm
-  location: location
-  dependsOn: [ resetAdminPassword ]
-  properties: {
-    source: {
-      script: $'''
-Install-PackageProvider -Name NuGet -Force
-Install-Module PSWindowsUpdate -Force
-Import-Module PSWindowsUpdate
-Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
-'''
-    }
-  }
-}
-
-//
-// ③ ページングファイル修復（レジストリ直書き）★最重要
-//
-resource fixPagingFileRegistry 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'FixPagingRegistry'
-  parent: vm
-  location: location
-  dependsOn: [ windowsUpdate ]
-  properties: {
-    source: {
-      script: $'''
-reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" ^
- /v PagingFiles ^
- /t REG_MULTI_SZ ^
- /d "C:\\pagefile.sys 4096 8192" ^
+# --- ページングファイル レジストリ完全修復 ---
+reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
+ /v PagingFiles `
+ /t REG_MULTI_SZ `
+ /d 'C:\\pagefile.sys 4096 8192' `
  /f
 
-reg delete "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" ^
- /v TempPageFile ^
+reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
+ /v TempPageFile `
  /f
-'''
-    }
-  }
-}
 
-//
-// ④ 再起動（1回のみ）
-/// 
-resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'RestartAfterFix'
-  parent: vm
-  location: location
-  dependsOn: [ fixPagingFileRegistry ]
-  properties: {
-    source: {
-      script: $'''
-Restart-Computer -Force
+Write-Output 'User and paging file configuration fixed successfully'
+"
 '''
     }
   }
