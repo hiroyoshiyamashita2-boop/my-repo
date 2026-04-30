@@ -86,7 +86,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 /*
  * Virtual Machine (Trusted Launch)
  */
-resource vm 'Microsoft.Compute/virtualMachines@2023-10-02' = {
+resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
   properties: {
