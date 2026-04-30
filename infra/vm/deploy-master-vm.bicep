@@ -10,13 +10,6 @@ param vmName string
 @description('Deployment date (YYYYMMDD)')
 param deployDate string
 
-@description('Local admin username')
-param adminUsername string = 'avdlocaladmin'
-
-@secure()
-@description('Local admin password')
-param adminPassword string
-
 @description('Virtual Machine size')
 param vmSize string = 'Standard_D2s_v5'
 
@@ -52,6 +45,7 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 
 /*
  * OS Disk (Snapshot -> Managed Disk)
+ * - Snapshot 作成時点のユーザー／パスワードを完全保持
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -91,6 +85,8 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 
 /*
  * Virtual Machine (Trusted Launch)
+ * - OS ディスクは Attach
+ * - osProfile は intentionally 未定義（Snapshot 状態を維持）
  */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
@@ -126,13 +122,12 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   }
 }
 
-//
-//  OS 起動後前提・堅牢な Custom Script Extension
-//  - dependsOn 明示（vm / nic / osDisk）
-//  - 初期待機 + Windows サービス稼働待ち
-//  - ローカル管理者作成／更新
-//  - ページングファイル レジストリ直接修正
-//
+/*
+ * Custom Script Extension
+ * - OS 起動安定化待機
+ * - ページングファイル調整のみ
+ * - ユーザー／パスワードは一切変更しない
+ */
 resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
   name: 'FixOsStateAlways'
   parent: vm
@@ -149,30 +144,20 @@ resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-
     autoUpgradeMinorVersion: true
 
     settings: {
-      commandToExecute: $'''
+      commandToExecute: '''
 powershell -ExecutionPolicy Bypass -Command "
 
 # --- 初期待機（VM Agent / OS 安定化） ---
 Start-Sleep -Seconds 30
 
-# --- OS 完全起動待ち（Azure VM Heartbeat サービス） ---
+# --- OS 完全起動待ち ---
 Write-Output 'Waiting for Azure VM heartbeat service...'
 while ((Get-Service vmicheartbeat).Status -ne 'Running') {
   Start-Sleep -Seconds 5
 }
 Write-Output 'OS is ready.'
 
-# --- ローカル管理者作成／再設定 ---
-$pwd = $env:ADMIN_PASSWORD
-
-if (-not (Get-LocalUser -Name '${adminUsername}' -ErrorAction SilentlyContinue)) {
-  net user ${adminUsername} $pwd /add
-} else {
-  net user ${adminUsername} $pwd
-}
-net localgroup Administrators ${adminUsername} /add
-
-# --- ページングファイル レジストリ完全修正 ---
+# --- ページングファイル調整のみ ---
 reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
  /v PagingFiles `
  /t REG_MULTI_SZ `
@@ -183,13 +168,9 @@ reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Ma
  /v TempPageFile `
  /f
 
-Write-Output 'OS state (user and paging file) fixed successfully.'
+Write-Output 'OS state fixed. Existing users and passwords preserved.'
 "
 '''
-    }
-
-    protectedSettings: {
-      ADMIN_PASSWORD: adminPassword
     }
   }
 }
