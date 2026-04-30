@@ -51,7 +51,7 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 }
 
 /*
- * OS Disk
+ * OS Disk (Standard SSD LRS)
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -129,9 +129,9 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   }
 }
 
-/*
- * 管理者パスワード再設定
- */
+//
+// ① 管理者パスワード再設定
+//
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ResetMasterAdminPassword'
   parent: vm
@@ -146,9 +146,9 @@ net localgroup Administrators ${adminUsername} /add
   }
 }
 
-/*
- * Windows Update
- */
+//
+// ② Windows Update
+//
 resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RunWindowsUpdate'
   parent: vm
@@ -163,6 +163,44 @@ Install-PackageProvider -Name NuGet -Force
 Install-Module PSWindowsUpdate -Force
 Import-Module PSWindowsUpdate
 Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
+'''
+    }
+  }
+}
+
+//
+// ③ ページングファイル修正
+//
+resource fixPagingFile 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'FixPagingFile'
+  parent: vm
+  location: location
+  dependsOn: [
+    windowsUpdate
+  ]
+  properties: {
+    source: {
+      script: $'''
+wmic computersystem where name="%computername%" set AutomaticManagedPagefile=True
+'''
+    }
+  }
+}
+
+//
+// ④ ✅ 再起動（1回だけ）
+//
+resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'RestartAfterPagingFix'
+  parent: vm
+  location: location
+  dependsOn: [
+    fixPagingFile
+  ]
+  properties: {
+    source: {
+      script: $'''
+Restart-Computer -Force
 '''
     }
   }
