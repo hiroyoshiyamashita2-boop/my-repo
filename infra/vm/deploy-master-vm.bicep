@@ -29,28 +29,36 @@ param subnetName string = 'AVD-MNG-JW'
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
 /*
- * Existing resources
+ * Existing Virtual Network
  */
 resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
   name: vnetName
 }
 
+/*
+ * Existing Subnet
+ */
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
   parent: vnet
   name: subnetName
 }
 
+/*
+ * Existing Snapshot
+ */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
 
 /*
- * OS Disk
+ * OS Disk (Snapshot -> Managed Disk)
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
   location: location
-  sku: { name: 'StandardSSD_LRS' }
+  sku: {
+    name: 'StandardSSD_LRS'
+  }
   properties: {
     creationData: {
       createOption: 'Copy'
@@ -61,7 +69,7 @@ resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
 }
 
 /*
- * NIC
+ * Network Interface
  */
 resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
   name: '${vmName}-nic'
@@ -71,7 +79,9 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
       {
         name: 'ipconfig1'
         properties: {
-          subnet: { id: subnet.id }
+          subnet: {
+            id: subnet.id
+          }
           privateIPAllocationMethod: 'Dynamic'
         }
       }
@@ -80,13 +90,15 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 }
 
 /*
- * VM (Trusted Launch)
+ * Virtual Machine (Trusted Launch)
  */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
   properties: {
-    hardwareProfile: { vmSize: vmSize }
+    hardwareProfile: {
+      vmSize: vmSize
+    }
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -98,22 +110,26 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
       osDisk: {
         name: osDiskName
         createOption: 'Attach'
-        managedDisk: { id: osDisk.id }
+        managedDisk: {
+          id: osDisk.id
+        }
         osType: 'Windows'
       }
     }
     networkProfile: {
       networkInterfaces: [
-        { id: nic.id }
+        {
+          id: nic.id
+        }
       ]
     }
   }
 }
 
 //
-//  恒久修正用 Custom Script Extension
+//  OS 状態を必ず正す Custom Script Extension
 //  - ローカル管理者作成／再設定
-//  - ページングファイルの壊れたレジストリを完全修復
+//  - ページングファイルの壊れたレジストリを直接修復
 //
 resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
   name: 'FixOsStateAlways'
@@ -125,10 +141,10 @@ resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-
     typeHandlerVersion: '1.10'
     autoUpgradeMinorVersion: true
     settings: {
-      commandToExecute: '''
+      commandToExecute: $'''
 powershell -ExecutionPolicy Bypass -Command "
 
-# --- ローカル管理者作成／更新 ---
+# --- ローカル管理者ユーザー作成／更新 ---
 if (-not (Get-LocalUser -Name '${adminUsername}' -ErrorAction SilentlyContinue)) {
   net user ${adminUsername} ${adminPassword} /add
 } else {
@@ -136,7 +152,7 @@ if (-not (Get-LocalUser -Name '${adminUsername}' -ErrorAction SilentlyContinue))
 }
 net localgroup Administrators ${adminUsername} /add
 
-# --- ページングファイル レジストリ完全修復 ---
+# --- ページングファイル レジストリ完全修正 ---
 reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
  /v PagingFiles `
  /t REG_MULTI_SZ `
@@ -147,7 +163,7 @@ reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Ma
  /v TempPageFile `
  /f
 
-Write-Output 'User and paging file configuration fixed successfully'
+Write-Output 'Local user and paging file registry have been fixed successfully.'
 "
 '''
     }
