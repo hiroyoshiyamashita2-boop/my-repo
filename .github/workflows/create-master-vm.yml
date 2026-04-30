@@ -23,6 +23,17 @@ on:
         required: true
         type: string
 
+      adminUsername:
+        description: 'Existing local admin username in snapshot'
+        required: true
+        default: avdlocaladmin
+        type: string
+
+      adminPassword:
+        description: 'New password to reset existing local admin user'
+        required: true
+        type: string
+
 permissions:
   id-token: write
   contents: read
@@ -77,4 +88,6 @@ jobs:
               location="${{ inputs.location }}" \
               snapshotName="${{ inputs.snapshotName }}" \
               vmName="${VM_BASE_NAME}" \
-              deployDate="${{ inputs.deployDate }}"
+              deployDate="${{ inputs.deployDate }}" \
+              adminUsername="${{ inputs.adminUsername }}" \
+              adminPassword="${{ inputs.adminPassword }}"
