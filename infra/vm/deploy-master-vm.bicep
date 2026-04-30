@@ -28,6 +28,7 @@ param subnetName string = 'AVD-MNG-JW'
 
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
+
 /*
  * Existing Virtual Network
  */
@@ -169,10 +170,10 @@ Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
 }
 
 //
-// ③ ページングファイルを自動管理に設定
+// ③ ページングファイルを C:\ に固定（決定打）
 //
-resource setPagingAuto 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'SetPagingAuto'
+resource fixPagingFileFinal 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'FixPagingFileFinal'
   parent: vm
   location: location
   dependsOn: [
@@ -181,40 +182,29 @@ resource setPagingAuto 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01
   properties: {
     source: {
       script: $'''
-wmic computersystem where name="%computername%" set AutomaticManagedPagefile=True
-'''
-    }
-  }
-}
-
-//
-// ④ 既存の壊れた pagefile 定義を完全削除
-//
-resource removePagingFile 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'RemovePagingFile'
-  parent: vm
-  location: location
-  dependsOn: [
-    setPagingAuto
-  ]
-  properties: {
-    source: {
-      script: $'''
+# 既存の pagefile 定義をすべて削除
 wmic pagefileset delete || exit /b 0
+
+# 自動管理を完全に OFF
+wmic computersystem where name="%computername%" set AutomaticManagedPagefile=False
+
+# C:\\ に pagefile を明示作成（安定構成）
+wmic pagefileset create name="C:\\pagefile.sys"
+wmic pagefileset where name="C:\\pagefile.sys" set InitialSize=4096,MaximumSize=8192
 '''
     }
   }
 }
 
 //
-// ⑤ 再起動（1回のみ）
+// ④ 再起動（1回だけ）
 //
 resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RestartAfterPagingFix'
   parent: vm
   location: location
   dependsOn: [
-    removePagingFile
+    fixPagingFileFinal
   ]
   properties: {
     source: {
