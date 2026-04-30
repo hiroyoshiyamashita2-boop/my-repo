@@ -11,7 +11,7 @@ param vmName string
 param deployDate string
 
 @description('Admin username for Master VM')
-param adminUsername string
+param adminUsername string = "avdlocaladmin"
 
 @secure()
 @description('Admin password for Master VM')
