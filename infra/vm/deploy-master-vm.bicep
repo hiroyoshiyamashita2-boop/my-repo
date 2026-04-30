@@ -28,7 +28,6 @@ param subnetName string = 'AVD-MNG-JW'
 
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
-
 /*
  * Existing Virtual Network
  */
@@ -45,14 +44,14 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing 
 }
 
 /*
- * Existing Snapshot (Gen2 / Trusted Launch 前提)
+ * Existing Snapshot
  */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
 
 /*
- * OS Disk (Standard SSD LRS)
+ * OS Disk
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -70,7 +69,7 @@ resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
 }
 
 /*
- * Network Interface
+ * NIC
  */
 resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
   name: '${vmName}-nic'
@@ -91,7 +90,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 }
 
 /*
- * Virtual Machine (Trusted Launch)
+ * VM (Trusted Launch)
  */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
@@ -100,7 +99,6 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     hardwareProfile: {
       vmSize: vmSize
     }
-
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -108,7 +106,6 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
         vTpmEnabled: true
       }
     }
-
     storageProfile: {
       osDisk: {
         name: osDiskName
@@ -119,22 +116,19 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
         osType: 'Windows'
       }
     }
-
     networkProfile: {
       networkInterfaces: [
-        {
-          id: nic.id
-        }
+        { id: nic.id }
       ]
     }
   }
 }
 
 //
-// ① 管理者パスワード再設定（ログイン安定化）
+// ① 管理者パスワード再設定
 //
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'ResetMasterAdminPassword'
+  name: 'ResetAdmin'
   parent: vm
   location: location
   properties: {
@@ -151,12 +145,10 @@ net localgroup Administrators ${adminUsername} /add
 // ② Windows Update
 //
 resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'RunWindowsUpdate'
+  name: 'WindowsUpdate'
   parent: vm
   location: location
-  dependsOn: [
-    resetAdminPassword
-  ]
+  dependsOn: [ resetAdminPassword ]
   properties: {
     source: {
       script: $'''
@@ -170,42 +162,38 @@ Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot
 }
 
 //
-// ③ ページングファイルを C:\ に固定（決定打）
+// ③ ページングファイル修復（レジストリ直書き）★最重要
 //
-resource fixPagingFileFinal 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'FixPagingFileFinal'
+resource fixPagingFileRegistry 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'FixPagingRegistry'
   parent: vm
   location: location
-  dependsOn: [
-    windowsUpdate
-  ]
+  dependsOn: [ windowsUpdate ]
   properties: {
     source: {
       script: $'''
-# 既存の pagefile 定義をすべて削除
-wmic pagefileset delete || exit /b 0
+reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" ^
+ /v PagingFiles ^
+ /t REG_MULTI_SZ ^
+ /d "C:\\pagefile.sys 4096 8192" ^
+ /f
 
-# 自動管理を完全に OFF
-wmic computersystem where name="%computername%" set AutomaticManagedPagefile=False
-
-# C:\\ に pagefile を明示作成（安定構成）
-wmic pagefileset create name="C:\\pagefile.sys"
-wmic pagefileset where name="C:\\pagefile.sys" set InitialSize=4096,MaximumSize=8192
+reg delete "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" ^
+ /v TempPageFile ^
+ /f
 '''
     }
   }
 }
 
 //
-// ④ 再起動（1回だけ）
-//
+// ④ 再起動（1回のみ）
+/// 
 resource restartVm 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'RestartAfterPagingFix'
+  name: 'RestartAfterFix'
   parent: vm
   location: location
-  dependsOn: [
-    fixPagingFileFinal
-  ]
+  dependsOn: [ fixPagingFileRegistry ]
   properties: {
     source: {
       script: $'''
