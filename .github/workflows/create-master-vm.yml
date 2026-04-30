@@ -1,0 +1,71 @@
+name: Create Master VM (Bicep)
+
+on:
+  workflow_dispatch:
+    inputs:
+      resourceGroupName:
+        description: 'Resource Group name'
+        required: true
+      snapshotName:
+        description: 'Snapshot name (e.g. PV906VMJW01-20260310-BeforeSysprep)'
+        required: true
+      location:
+        description: 'Azure location'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. リポジトリをチェックアウト
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Azure にログイン
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 3. 既存 VM の存在チェック（安全ガード）
+      - name: Check existing VM
+        shell: bash
+        run: |
+          set -e
+
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          RESOURCE_GROUP="${{ inputs.resourceGroupName }}"
+
+          # スナップショット名の先頭（例: P906VMJW01）を抽出
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+
+          echo "Snapshot name      : ${SNAPSHOT_NAME}"
+          echo "VM base name check : ${VM_BASE_NAME}"
+
+          # VM の存在確認
+          if az vm show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_BASE_NAME}" \
+            --query "name" \
+            --output tsv > /dev/null 2>&1; then
+            echo "ERROR: VM '${VM_BASE_NAME}' already exists. Abort."
+            exit 1
+          else
+            echo "OK: VM '${VM_BASE_NAME}' does not exist. Continue."
+          fi
+
+      # 4. Bicep による Master VM 作成
+      - name: Deploy Bicep
+        shell: bash
+        run: |
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+
+          az deployment group create \
+            --resource-group "${{ inputs.resourceGroupName }}" \
+            --template-file main.bicep \
+            --parameters \
+              location="${{ inputs.location }}" \
+              snapshotName="${{ inputs.snapshotName }}" \
+              vmName="${VM_BASE_NAME}"
