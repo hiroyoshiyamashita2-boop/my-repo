@@ -37,15 +37,14 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing 
 }
 
 /*
- * Existing Snapshot (Gen2 / Trusted Launch 対応前提)
+ * Existing Snapshot (Gen2 / Trusted Launch 前提)
  */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
 
 /*
- * OS Disk (Snapshot → Managed Disk)
- * Storage: Standard SSD LRS
+ * OS Disk (Standard SSD LRS)
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -94,9 +93,6 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
       vmSize: vmSize
     }
 
-    /*
-     * Trusted Launch 設定
-     */
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -121,6 +117,29 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
         {
           id: nic.id
         }
+      ]
+    }
+  }
+}
+
+/*
+ * Windows Update 実行（Run Command）
+ * VM 作成完了後に必ず実行される
+ */
+resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'RunWindowsUpdate'
+  parent: vm
+  location: location
+  dependsOn: [
+    vm
+  ]
+  properties: {
+    source: {
+      script: [
+        'Install-PackageProvider -Name NuGet -Force'
+        'Install-Module PSWindowsUpdate -Force'
+        'Import-Module PSWindowsUpdate'
+        'Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot'
       ]
     }
   }
