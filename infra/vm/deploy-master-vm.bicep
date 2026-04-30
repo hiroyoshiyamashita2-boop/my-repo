@@ -10,7 +10,7 @@ param vmName string
 @description('Deployment date (YYYYMMDD)')
 param deployDate string
 
-@description('Admin username for Master VM (fixed: avdlocaladmin)')
+@description('Admin username for Master VM')
 param adminUsername string = 'avdlocaladmin'
 
 @secure()
@@ -51,8 +51,7 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 }
 
 /*
- * OS Disk (Snapshot → Managed Disk)
- * Storage: Standard SSD LRS
+ * OS Disk
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -131,9 +130,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 /*
- * Master VM 用 管理者パスワード再設定
- * - Username: adminUsername（既定 avdlocaladmin）
- * - Portal の「Reset password」と同等
+ * 管理者パスワード再設定
  */
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ResetMasterAdminPassword'
@@ -141,7 +138,7 @@ resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-
   location: location
   properties: {
     source: {
-      script: '''
+      script: $'''
 net user ${adminUsername} ${adminPassword}
 net localgroup Administrators ${adminUsername} /add
 '''
@@ -150,7 +147,7 @@ net localgroup Administrators ${adminUsername} /add
 }
 
 /*
- * Windows Update 実行（Run Command）
+ * Windows Update
  */
 resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RunWindowsUpdate'
@@ -161,7 +158,7 @@ resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01
   ]
   properties: {
     source: {
-      script: '''
+      script: $'''
 Install-PackageProvider -Name NuGet -Force
 Install-Module PSWindowsUpdate -Force
 Import-Module PSWindowsUpdate
