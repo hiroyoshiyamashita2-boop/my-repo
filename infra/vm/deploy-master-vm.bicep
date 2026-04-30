@@ -10,6 +10,13 @@ param vmName string
 @description('Deployment date (YYYYMMDD)')
 param deployDate string
 
+@description('Admin username for Master VM')
+param adminUsername string
+
+@secure()
+@description('Admin password for Master VM')
+param adminPassword string
+
 @description('Virtual Machine size')
 param vmSize string = 'Standard_D2s_v5'
 
@@ -94,9 +101,6 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
       vmSize: vmSize
     }
 
-    /*
-     * Trusted Launch 設定
-     */
     securityProfile: {
       securityType: 'TrustedLaunch'
       uefiSettings: {
@@ -127,13 +131,33 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 /*
+ * 管理者アカウントのパスワード再設定
+ * (Portal の Reset password 相当)
+ */
+resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'ResetMasterAdminPassword'
+  parent: vm
+  location: location
+  properties: {
+    source: {
+      script: '''
+net user ${adminUsername} ${adminPassword}
+net localgroup Administrators ${adminUsername} /add
+'''
+    }
+  }
+}
+
+/*
  * Windows Update 実行（Run Command）
- * ※ script は string（配列不可）
  */
 resource windowsUpdate 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'RunWindowsUpdate'
   parent: vm
   location: location
+  dependsOn: [
+    resetAdminPassword
+  ]
   properties: {
     source: {
       script: '''
