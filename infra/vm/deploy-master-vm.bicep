@@ -17,7 +17,7 @@ param vmSize string = 'Standard_D2s_v5'
 param vnetName string = 'P906VNJWPB01'
 
 @description('Existing subnet name')
-param subnetName string = 'AVD-SH-JW'
+param subnetName string = 'AVD-MNG-JW'
 
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
