@@ -130,8 +130,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 
 /*
  * ✅ Master VM 用 管理者パスワード再設定
- * Username 固定: avdlocaladmin
- * Portal の「Reset password」と同等
+ * - Username: avdlocaladmin（固定）
+ * - Portal の「Reset password」と同等
  */
 resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ResetMasterAdminPassword'
@@ -140,8 +140,8 @@ resource resetAdminPassword 'Microsoft.Compute/virtualMachines/runCommands@2023-
   properties: {
     source: {
       script: '''
-net user avdlocaladmin ${adminPassword}
-net localgroup Administrators avdlocaladmin /add
+net user ${adminUsername} ${adminPassword}
+net localgroup Administrators ${adminUsername} /add
 '''
     }
   }
