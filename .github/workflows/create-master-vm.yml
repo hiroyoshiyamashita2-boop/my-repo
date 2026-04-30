@@ -16,6 +16,11 @@ on:
         required: true
         type: string
 
+# ✅ OIDC を利用するために必須
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -25,13 +30,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Azure にログイン（証明書認証）
-      - name: Azure Login (certificate)
+      # 2. Azure にログイン（OIDC）
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-            creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 3. 既存 VM の存在チェック（ガード）
+      # 3. 既存 VM の存在チェック（安全ガード）
       - name: Check existing VM
         shell: bash
         run: |
@@ -40,11 +47,11 @@ jobs:
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
           RESOURCE_GROUP="${{ inputs.resourceGroupName }}"
 
-          # 先頭プレフィックスを VM 名として使用
+          # スナップショット名の先頭を VM 名として利用
           VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
-          echo "Snapshot name      : ${SNAPSHOT_NAME}"
-          echo "VM name to check   : ${VM_BASE_NAME}"
+          echo "Snapshot name    : ${SNAPSHOT_NAME}"
+          echo "VM name to check : ${VM_BASE_NAME}"
 
           if az vm show \
             --resource-group "${RESOURCE_GROUP}" \
