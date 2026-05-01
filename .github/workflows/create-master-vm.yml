@@ -23,6 +23,11 @@ on:
         required: true
         type: string
 
+      adminPassword:
+        description: 'Local admin password for the target VM'
+        required: true
+        type: string   # ⚠ GitHub UIではマスクされません
+
 permissions:
   id-token: write
   contents: read
@@ -42,7 +47,9 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      #----------------------------------------
       # 既存 VM チェック
+      #----------------------------------------
       - name: Check existing VM
         shell: bash
         run: |
@@ -60,7 +67,9 @@ jobs:
             exit 1
           fi
 
-      # Bicep Deploy
+      #----------------------------------------
+      # Phase 1: Master VM 作成
+      #----------------------------------------
       - name: Deploy Master VM with Bicep
         shell: bash
         run: |
@@ -77,3 +86,52 @@ jobs:
               snapshotName="${SNAPSHOT_NAME}" \
               vmName="${VM_BASE_NAME}" \
               deployDate="${{ inputs.deployDate }}"
+
+      #----------------------------------------
+      # 起動待ち
+      #----------------------------------------
+      - name: Wait for VM to be fully running
+        shell: bash
+        run: |
+          echo "Waiting for VM to be in running state..."
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+
+          for i in {1..30}; do
+            STATE=$(az vm get-instance-view \
+              --resource-group "${{ inputs.resourceGroupName }}" \
+              --name "${VM_BASE_NAME}" \
+              --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus" \
+              --output tsv)
+
+            echo "Current VM state: $STATE"
+
+            if [[ "$STATE" == "VM running" ]]; then
+              echo "VM is running."
+              exit 0
+            fi
+
+            sleep 20
+          done
+
+          echo "ERROR: VM did not reach 'running' state in time."
+          exit 1
+
+      #----------------------------------------
+      # Phase 2: Run Command（OS 設定 + パスワードリセット）
+      #----------------------------------------
+      - name: Run Command - Configure OS State
+        shell: bash
+        run: |
+          set -e
+
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+
+          az deployment group create \
+            --resource-group "${{ inputs.resourceGroupName }}" \
+            --template-file infra/vm/runcommand-configure-os-state.bicep \
+            --parameters \
+              location="${{ inputs.location }}" \
+              vmName="${VM_BASE_NAME}" \
+              adminPassword="${{ inputs.adminPassword }}"
