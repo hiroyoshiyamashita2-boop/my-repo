@@ -133,62 +133,33 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
  * - ページングファイル調整
  * - 実行ログを VM 内に永続保存
  */
-resource fixOsStateExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' = {
-  name: 'FixOsStateWithLogging'
+
+resource runCmd 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'FixOsState'
   parent: vm
   location: location
   properties: {
-    publisher: 'Microsoft.Compute'
-    type: 'CustomScriptExtension'
-    typeHandlerVersion: '1.10'
-    autoUpgradeMinorVersion: true
-
-    settings: {
-      commandToExecute: '''
-powershell -ExecutionPolicy Bypass -Command "
-
-$logDir = 'C:\\Azure\\CustomScript'
-$logFile = '${logFilePath}'
-
+    source: {
+      script: '''
+$logDir = "C:\Azure\RunCommand"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-Start-Transcript -Path $logFile -Append
+$log = "$logDir\fix-os.log"
 
-Write-Output '=== Fix OS State Script START ==='
-Write-Output \"Timestamp: $(Get-Date -Format u)\"
+"START $(Get-Date)" | Out-File $log -Append
 
-Start-Sleep -Seconds 30
+net user avdlocaladmin 'NewPasswordHere'
+"Password updated" | Out-File $log -Append
 
-Write-Output 'Waiting for Azure VM heartbeat service...'
-while ((Get-Service vmicheartbeat).Status -ne 'Running') {
-  Start-Sleep -Seconds 5
-}
-Write-Output 'OS is ready.'
-
-# --- パスワードリセット ---
-net user ${adminUsername} $env:ADMIN_PASSWORD
-Write-Output 'Password reset completed.'
-
-# --- ページングファイル設定 ---
-reg add 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" `
  /v PagingFiles `
  /t REG_MULTI_SZ `
- /d 'C:\\pagefile.sys 4096 8192' `
+ /d "C:\pagefile.sys 4096 8192" `
  /f
 
-reg delete 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
- /v TempPageFile `
- /f
-
-Write-Output 'Paging file configuration updated.'
-Write-Output '=== Fix OS State Script END ==='
-
-Stop-Transcript
-"
+"Paging file updated" | Out-File $log -Append
+"END $(Get-Date)" | Out-File $log -Append
 '''
-    }
-
-    protectedSettings: {
-      ADMIN_PASSWORD: adminPassword
     }
   }
 }
+
