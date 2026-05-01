@@ -42,11 +42,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # 既存 VM チェック
       - name: Check existing VM
         shell: bash
         run: |
           set -e
-          VM_BASE_NAME="${{ inputs.snapshotName%%-* }}"
+
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
           if az vm show \
             --resource-group "${{ inputs.resourceGroupName }}" \
@@ -57,16 +60,20 @@ jobs:
             exit 1
           fi
 
+      # Bicep Deploy
       - name: Deploy Master VM with Bicep
         shell: bash
         run: |
-          VM_BASE_NAME="${{ inputs.snapshotName%%-* }}"
+          set -e
+
+          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
+          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
           az deployment group create \
             --resource-group "${{ inputs.resourceGroupName }}" \
             --template-file infra/vm/deploy-master-vm.bicep \
             --parameters \
               location="${{ inputs.location }}" \
-              snapshotName="${{ inputs.snapshotName }}" \
+              snapshotName="${SNAPSHOT_NAME}" \
               vmName="${VM_BASE_NAME}" \
               deployDate="${{ inputs.deployDate }}"
