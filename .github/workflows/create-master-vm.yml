@@ -26,7 +26,7 @@ on:
       adminPassword:
         description: 'Local administrator password'
         required: true
-        type: string   # GitHub仕様上マスクされません
+        type: string   # GitHub UI ではマスクされません（仕様）
 
 permissions:
   id-token: write
@@ -75,7 +75,7 @@ jobs:
             --resource-group "${{ inputs.resourceGroupName }}" \
             --name "${{ steps.derive.outputs.vmName }}" \
             --query name -o tsv >/dev/null 2>&1; then
-            echo "ERROR: VM '${{ steps.derive.outputs.vmName }}' already exists. Snapshot restore must create a NEW VM."
+            echo "ERROR: VM '${{ steps.derive.outputs.vmName }}' already exists."
             exit 1
           fi
 
@@ -127,7 +127,7 @@ jobs:
       # -------------------------------------------------
       # Phase 2-1: Run Command（Pre-Reboot）
       # -------------------------------------------------
-      - name: Run Command - Pre Reboot
+      - name: Run Command - Pre Reboot (Configure OS + Windows Update)
         shell: bash
         run: |
           az deployment group create \
@@ -139,7 +139,7 @@ jobs:
               adminPassword="${{ inputs.adminPassword }}"
 
       # -------------------------------------------------
-      # 再起動待ち
+      # 再起動待ち（Windows Update 後）
       # -------------------------------------------------
       - name: Wait for VM reboot completion
         shell: bash
@@ -169,7 +169,7 @@ jobs:
       # -------------------------------------------------
       # Phase 2-2: Run Command（Post-Reboot）
       # -------------------------------------------------
-      - name: Run Command - Post Reboot
+      - name: Run Command - Post Reboot (Windows Update Verification)
         shell: bash
         run: |
           az deployment group create \
@@ -178,3 +178,17 @@ jobs:
             --parameters \
               location="${{ inputs.location }}" \
               vmName="${{ steps.derive.outputs.vmName }}"
+
+      # -------------------------------------------------
+      # Phase 3: 完了後に VM を Stop（Deallocate）
+      # -------------------------------------------------
+      - name: Stop and Deallocate VM after successful completion
+        shell: bash
+        run: |
+          echo "Deallocating VM after successful OS configuration..."
+
+          az vm deallocate \
+            --resource-group "${{ inputs.resourceGroupName }}" \
+            --name "${{ steps.derive.outputs.vmName }}"
+
+          echo "VM successfully deallocated."
