@@ -24,9 +24,9 @@ on:
         type: string
 
       adminPassword:
-        description: 'Local admin password for the target VM'
+        description: 'Local admin password for the target VM (VMごとに指定)'
         required: true
-        type: string   # ⚠ GitHub UIではマスクされません
+        type: string   # ⚠ GitHub UIではマスクされません（仕様）
 
 permissions:
   id-token: write
@@ -47,9 +47,9 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      #----------------------------------------
+      # -------------------------------------------------
       # 既存 VM チェック
-      #----------------------------------------
+      # -------------------------------------------------
       - name: Check existing VM
         shell: bash
         run: |
@@ -67,9 +67,9 @@ jobs:
             exit 1
           fi
 
-      #----------------------------------------
-      # Phase 1: Master VM 作成
-      #----------------------------------------
+      # -------------------------------------------------
+      # Phase 1: Master VM 作成（Snapshot → OS Attach）
+      # -------------------------------------------------
       - name: Deploy Master VM with Bicep
         shell: bash
         run: |
@@ -87,13 +87,14 @@ jobs:
               vmName="${VM_BASE_NAME}" \
               deployDate="${{ inputs.deployDate }}"
 
-      #----------------------------------------
-      # 起動待ち
-      #----------------------------------------
+      # -------------------------------------------------
+      # VM 起動待ち（Trusted Launch + 未 Sysprep 対策）
+      # -------------------------------------------------
       - name: Wait for VM to be fully running
         shell: bash
         run: |
           echo "Waiting for VM to be in running state..."
+
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
           VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
 
@@ -117,9 +118,9 @@ jobs:
           echo "ERROR: VM did not reach 'running' state in time."
           exit 1
 
-      #----------------------------------------
-      # Phase 2: Run Command（OS 設定 + パスワードリセット）
-      #----------------------------------------
+      # -------------------------------------------------
+      # Phase 2: Run Command（パスワードリセット + Paging 設定）
+      # -------------------------------------------------
       - name: Run Command - Configure OS State
         shell: bash
         run: |
