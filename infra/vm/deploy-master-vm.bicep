@@ -19,15 +19,7 @@ param vnetName string = 'P906VNJWPB01'
 @description('Existing subnet name')
 param subnetName string = 'AVD-MNG-JW'
 
-@description('Existing local admin username (must already exist in snapshot)')
-param adminUsername string = 'avdlocaladmin'
-
-@secure()
-@description('New password for existing local admin user')
-param adminPassword string
-
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
-var logFilePath = 'C:\\Azure\\CustomScript\\fix-os-state.log'
 
 /*
  * Existing Virtual Network
@@ -52,7 +44,7 @@ resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
 }
 
 /*
- * OS Disk (Snapshot -> Managed Disk)
+ * OS Disk (Snapshot → Managed Disk)
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
@@ -128,38 +120,45 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
 }
 
 /*
- * Custom Script Extension
- * - パスワードリセット
- * - ページングファイル調整
- * - 実行ログを VM 内に永続保存
+ * Run Command – Paging file configuration only
  */
-
-resource runCmd 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'FixOsState'
+resource pagingFileConfig 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'ConfigurePagingFile'
   parent: vm
   location: location
   properties: {
     source: {
       script: '''
-$logDir = "C:\Azure\RunCommand"
+$logDir = 'C:\Azure\RunCommand'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$log = "$logDir\fix-os.log"
+$logFile = Join-Path $logDir 'paging-file.log'
 
-"START $(Get-Date)" | Out-File $log -Append
+Start-Transcript -Path $logFile -Append
 
-net user avdlocaladmin 'NewPasswordHere'
-"Password updated" | Out-File $log -Append
+Write-Output "START Paging file configuration: $(Get-Date -Format u)"
 
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" `
- /v PagingFiles `
- /t REG_MULTI_SZ `
- /d "C:\pagefile.sys 4096 8192" `
- /f
+# OS 安定待ち（最低限）
+Start-Sleep -Seconds 60
 
-"Paging file updated" | Out-File $log -Append
-"END $(Get-Date)" | Out-File $log -Append
+# 既存ページングファイル設定を上書き
+reg add 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  /v PagingFiles `
+  /t REG_MULTI_SZ `
+  /d 'C:\pagefile.sys 4096 8192' `
+  /f
+
+# テンポラリページファイル削除
+reg delete 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  /v TempPageFile `
+  /f
+
+Write-Output 'Paging file updated successfully.'
+
+Stop-Transcript
+
+# 再起動で確実に反映
+Restart-Computer -Force
 '''
     }
   }
 }
-
