@@ -20,7 +20,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
 
 /*
  * Run Command
- * - Reset local admin password (only once, if required)
+ * - Reset local admin password
  * - Configure paging file
  * - Save logs to C:\WindowsAzure\Logs
  */
@@ -33,7 +33,6 @@ resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runComman
       script: '''
 $logDir  = "C:\WindowsAzure\Logs"
 $logFile = "$logDir\ConfigureOsState.log"
-$flag    = "$logDir\ConfigureOsState.completed"
 
 # Ensure log directory exists
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -41,13 +40,6 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Start-Transcript -Path $logFile -Append
 
 Write-Output "START Configure OS State: $(Get-Date -Format u)"
-
-# Idempotency control
-if (Test-Path $flag) {
-  Write-Output "Configuration already completed. Exit."
-  Stop-Transcript
-  exit 0
-}
 
 # --- Local admin password reset ---
 Write-Output "Resetting local administrator password..."
@@ -68,10 +60,6 @@ Remove-ItemProperty `
   -ErrorAction SilentlyContinue
 
 Write-Output "Paging file configuration updated."
-
-# Mark as completed
-New-Item -ItemType File -Path $flag -Force | Out-Null
-
 Write-Output "END Configure OS State: $(Get-Date -Format u)"
 
 Stop-Transcript
