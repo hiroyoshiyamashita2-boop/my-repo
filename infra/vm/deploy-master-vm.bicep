@@ -1,163 +1,80 @@
 @description('Azure region')
 param location string
 
-@description('Snapshot name to create OS disk from')
-param snapshotName string
-
-@description('Virtual Machine name')
+@description('Target virtual machine name')
 param vmName string
 
-@description('Deployment date (YYYYMMDD)')
-param deployDate string
+@description('Local administrator username (must already exist)')
+param adminUsername string = 'avdlocaladmin'
 
-@description('Virtual Machine size')
-param vmSize string = 'Standard_D2s_v5'
-
-@description('Existing virtual network name')
-param vnetName string = 'P906VNJWPB01'
-
-@description('Existing subnet name')
-param subnetName string = 'AVD-MNG-JW'
-
-var osDiskName = '${vmName}-OsDisk01-${deployDate}'
+@secure()
+@description('New password for local administrator user')
+param adminPassword string
 
 /*
- * Existing Virtual Network
+ * Existing Virtual Machine
  */
-resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
-  name: vnetName
-}
-
-/*
- * Existing Subnet
- */
-resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
-  parent: vnet
-  name: subnetName
-}
-
-/*
- * Existing Snapshot
- */
-resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
-  name: snapshotName
-}
-
-/*
- * OS Disk (Snapshot → Managed Disk)
- */
-resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
-  name: osDiskName
-  location: location
-  sku: {
-    name: 'StandardSSD_LRS'
-  }
-  properties: {
-    creationData: {
-      createOption: 'Copy'
-      sourceResourceId: snapshot.id
-    }
-    osType: 'Windows'
-  }
-}
-
-/*
- * Network Interface
- */
-resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
-  name: '${vmName}-nic'
-  location: location
-  properties: {
-    ipConfigurations: [
-      {
-        name: 'ipconfig1'
-        properties: {
-          subnet: {
-            id: subnet.id
-          }
-          privateIPAllocationMethod: 'Dynamic'
-        }
-      }
-    ]
-  }
-}
-
-/*
- * Virtual Machine (Trusted Launch)
- */
-resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
+resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
   name: vmName
-  location: location
-  properties: {
-    hardwareProfile: {
-      vmSize: vmSize
-    }
-    securityProfile: {
-      securityType: 'TrustedLaunch'
-      uefiSettings: {
-        secureBootEnabled: true
-        vTpmEnabled: true
-      }
-    }
-    storageProfile: {
-      osDisk: {
-        name: osDiskName
-        createOption: 'Attach'
-        managedDisk: {
-          id: osDisk.id
-        }
-        osType: 'Windows'
-      }
-    }
-    networkProfile: {
-      networkInterfaces: [
-        {
-          id: nic.id
-        }
-      ]
-    }
-  }
 }
 
 /*
- * Run Command – Paging file configuration only
+ * Run Command
+ * - Reset local admin password (only once, if required)
+ * - Configure paging file
+ * - Save logs to C:\WindowsAzure\Logs
  */
-resource pagingFileConfig 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'ConfigurePagingFile'
+resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+  name: 'ConfigureOsState'
   parent: vm
   location: location
   properties: {
     source: {
       script: '''
-$logDir = 'C:\Azure\RunCommand'
+$logDir  = "C:\WindowsAzure\Logs"
+$logFile = "$logDir\ConfigureOsState.log"
+$flag    = "$logDir\ConfigureOsState.completed"
+
+# Ensure log directory exists
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$logFile = Join-Path $logDir 'paging-file.log'
 
 Start-Transcript -Path $logFile -Append
 
-Write-Output "START Paging file configuration: $(Get-Date -Format u)"
+Write-Output "START Configure OS State: $(Get-Date -Format u)"
 
-# OS 安定待ち（最低限）
-Start-Sleep -Seconds 60
+# Idempotency control
+if (Test-Path $flag) {
+  Write-Output "Configuration already completed. Exit."
+  Stop-Transcript
+  exit 0
+}
 
-# 既存ページングファイル設定を上書き
-reg add 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  /v PagingFiles `
-  /t REG_MULTI_SZ `
-  /d 'C:\pagefile.sys 4096 8192' `
-  /f
+# --- Local admin password reset ---
+Write-Output "Resetting local administrator password..."
+net user ${adminUsername} "${adminPassword}"
+Write-Output "Local administrator password reset completed."
 
-# テンポラリページファイル削除
-reg delete 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  /v TempPageFile `
-  /f
+# --- Configure paging file ---
+Write-Output "Configuring paging file..."
+Set-ItemProperty `
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  -Name 'PagingFiles' `
+  -Value 'C:\pagefile.sys 4096 8192'
 
-Write-Output 'Paging file updated successfully.'
+# Remove TempPageFile if exists
+Remove-ItemProperty `
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  -Name 'TempPageFile' `
+  -ErrorAction SilentlyContinue
+
+Write-Output "Paging file configuration updated."
+
+# Mark as completed
+New-Item -ItemType File -Path $flag -Force | Out-Null
+
+Write-Output "END Configure OS State: $(Get-Date -Format u)"
 
 Stop-Transcript
-
-# 再起動で確実に反映
-Restart-Computer -Force
 '''
     }
   }
