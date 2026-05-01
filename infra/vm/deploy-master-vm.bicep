@@ -13,6 +13,9 @@ param deployDate string
 @description('Virtual Machine size')
 param vmSize string = 'Standard_D2s_v5'
 
+@description('Existing virtual network resource group name')
+param vnetRgName string = 'P906RGJWPB01'
+
 @description('Existing virtual network name')
 param vnetName string = 'P906VNJWPB01'
 
@@ -22,29 +25,31 @@ param subnetName string = 'AVD-MNG-JW'
 var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
 /*
- * Existing Virtual Network
+ * Existing Virtual Network (別RG)
  */
 resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
   name: vnetName
+  scope: resourceGroup(vnetRgName)
 }
 
 /*
- * Existing Subnet
+ * Existing Subnet (別RG)
  */
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
-  parent: vnet
   name: subnetName
+  parent: vnet
 }
 
 /*
  * Existing Snapshot
+ * ※ Snapshot が別RGの場合は scope を追加
  */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
 }
 
 /*
- * OS Disk (Snapshot -> Managed Disk)
+ * OS Disk (Snapshot → Managed Disk)
  */
 resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
   name: osDiskName
