@@ -1,4 +1,4 @@
-name: Create Master VM (Bicep)
+name: Create Master VM and Configure OS (Bicep + RunCommand)
 
 on:
   workflow_dispatch:
@@ -8,8 +8,13 @@ on:
         required: true
         type: string
 
+      vmName:
+        description: 'New Master VM name (既存の場合はエラー)'
+        required: true
+        type: string
+
       snapshotName:
-        description: 'Snapshot name (e.g. P906VMJW01-20260310-BeforeSysprep)'
+        description: 'Source snapshot name'
         required: true
         type: string
 
@@ -26,14 +31,14 @@ on:
       adminPassword:
         description: 'Local administrator password (VMごとに指定)'
         required: true
-        type: string   # ※ GitHub UI ではマスクされません（仕様）
+        type: string   # GitHub UIではマスクされません（仕様）
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy:
+  create-master-vm:
     runs-on: ubuntu-latest
 
     steps:
@@ -48,22 +53,66 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # -------------------------------------------------
-      # VM 名決定（Snapshot 名から派生）
+      # 事前チェック：VM が存在したら異常終了
       # -------------------------------------------------
-      - name: Set VM name
-        id: setvm
+      - name: Verify VM does not already exist
         shell: bash
         run: |
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
-          echo "vmName=$VM_BASE_NAME" >> $GITHUB_OUTPUT
+          if az vm show \
+            --resource-group "${{ inputs.resourceGroupName }}" \
+            --name "${{ inputs.vmName }}" \
+            --query name -o tsv >/dev/null 2>&1; then
+            echo "ERROR: VM '${{ inputs.vmName }}' already exists. This job creates a NEW Master VM only."
+            exit 1
+          fi
+
+          echo "VM does not exist. OK to proceed."
+
+      # -------------------------------------------------
+      # Phase 1: Master VM 作成
+      # -------------------------------------------------
+      - name: Deploy Master VM with Bicep
+        shell: bash
+        run: |
+          az deployment group create \
+            --resource-group "${{ inputs.resourceGroupName }}" \
+            --template-file infra/vm/deploy-master-vm.bicep \
+            --parameters \
+              location="${{ inputs.location }}" \
+              snapshotName="${{ inputs.snapshotName }}" \
+              vmName="${{ inputs.vmName }}" \
+              deployDate="${{ inputs.deployDate }}"
+
+      # -------------------------------------------------
+      # VM 起動待ち
+      # -------------------------------------------------
+      - name: Wait for VM to be running
+        shell: bash
+        run: |
+          echo "Waiting for VM to be in running state..."
+
+          for i in {1..40}; do
+            STATE=$(az vm get-instance-view \
+              --resource-group "${{ inputs.resourceGroupName }}" \
+              --name "${{ inputs.vmName }}" \
+              --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus" \
+              --output tsv)
+
+            echo "Current VM state: $STATE"
+
+            if [[ "$STATE" == "VM running" ]]; then
+              echo "VM is running."
+              exit 0
+            fi
+
+            sleep 30
+          done
+
+          echo "ERROR: VM did not reach running state."
+          exit 1
 
       # -------------------------------------------------
       # Phase 2-1: Run Command（Pre-Reboot）
-      # ・PWリセット
-      # ・Paging 設定
-      # ・Windows Update 実行
-      # ・再起動
       # -------------------------------------------------
       - name: Run Command - Pre Reboot (Configure OS + Windows Update)
         shell: bash
@@ -73,23 +122,21 @@ jobs:
             --template-file infra/vm/runcommand-configure-os-state.bicep \
             --parameters \
               location="${{ inputs.location }}" \
-              vmName="${{ steps.setvm.outputs.vmName }}" \
+              vmName="${{ inputs.vmName }}" \
               adminPassword="${{ inputs.adminPassword }}"
 
       # -------------------------------------------------
-      # 再起動待ち（Windows Update 後）
+      # Windows Update 後の再起動待ち
       # -------------------------------------------------
       - name: Wait for VM reboot completion
         shell: bash
         run: |
           echo "Waiting for VM reboot completion..."
 
-          VM_NAME="${{ steps.setvm.outputs.vmName }}"
-
           for i in {1..40}; do
             STATE=$(az vm get-instance-view \
               --resource-group "${{ inputs.resourceGroupName }}" \
-              --name "$VM_NAME" \
+              --name "${{ inputs.vmName }}" \
               --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus" \
               --output tsv)
 
@@ -108,7 +155,6 @@ jobs:
 
       # -------------------------------------------------
       # Phase 2-2: Run Command（Post-Reboot）
-      # ・Windows Update 完了確認
       # -------------------------------------------------
       - name: Run Command - Post Reboot (Windows Update Verification)
         shell: bash
@@ -118,4 +164,4 @@ jobs:
             --template-file infra/vm/runcommand-windowsupdate-postreboot.bicep \
             --parameters \
               location="${{ inputs.location }}" \
-              vmName="${{ steps.setvm.outputs.vmName }}"
+              vmName="${{ inputs.vmName }}"
