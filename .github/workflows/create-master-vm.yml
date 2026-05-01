@@ -24,9 +24,9 @@ on:
         type: string
 
       adminPassword:
-        description: 'Local admin password for the target VM (VMごとに指定)'
+        description: 'Local administrator password (VMごとに指定)'
         required: true
-        type: string   # ⚠ GitHub UIではマスクされません（仕様）
+        type: string   # ※ GitHub UI ではマスクされません（仕様）
 
 permissions:
   id-token: write
@@ -48,91 +48,74 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # -------------------------------------------------
-      # 既存 VM チェック
+      # VM 名決定（Snapshot 名から派生）
       # -------------------------------------------------
-      - name: Check existing VM
+      - name: Set VM name
+        id: setvm
         shell: bash
         run: |
-          set -e
-
           SNAPSHOT_NAME="${{ inputs.snapshotName }}"
           VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
-
-          if az vm show \
-            --resource-group "${{ inputs.resourceGroupName }}" \
-            --name "${VM_BASE_NAME}" \
-            --query name \
-            --output tsv > /dev/null 2>&1; then
-            echo "ERROR: VM '${VM_BASE_NAME}' already exists."
-            exit 1
-          fi
+          echo "vmName=$VM_BASE_NAME" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------
-      # Phase 1: Master VM 作成（Snapshot → OS Attach）
+      # Phase 2-1: Run Command（Pre-Reboot）
+      # ・PWリセット
+      # ・Paging 設定
+      # ・Windows Update 実行
+      # ・再起動
       # -------------------------------------------------
-      - name: Deploy Master VM with Bicep
+      - name: Run Command - Pre Reboot (Configure OS + Windows Update)
         shell: bash
         run: |
-          set -e
-
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
-
           az deployment group create \
             --resource-group "${{ inputs.resourceGroupName }}" \
-            --template-file infra/vm/deploy-master-vm.bicep \
+            --template-file infra/vm/runcommand-configure-os-state.bicep \
             --parameters \
               location="${{ inputs.location }}" \
-              snapshotName="${SNAPSHOT_NAME}" \
-              vmName="${VM_BASE_NAME}" \
-              deployDate="${{ inputs.deployDate }}"
+              vmName="${{ steps.setvm.outputs.vmName }}" \
+              adminPassword="${{ inputs.adminPassword }}"
 
       # -------------------------------------------------
-      # VM 起動待ち（Trusted Launch + 未 Sysprep 対策）
+      # 再起動待ち（Windows Update 後）
       # -------------------------------------------------
-      - name: Wait for VM to be fully running
+      - name: Wait for VM reboot completion
         shell: bash
         run: |
-          echo "Waiting for VM to be in running state..."
+          echo "Waiting for VM reboot completion..."
 
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+          VM_NAME="${{ steps.setvm.outputs.vmName }}"
 
-          for i in {1..30}; do
+          for i in {1..40}; do
             STATE=$(az vm get-instance-view \
               --resource-group "${{ inputs.resourceGroupName }}" \
-              --name "${VM_BASE_NAME}" \
+              --name "$VM_NAME" \
               --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus" \
               --output tsv)
 
             echo "Current VM state: $STATE"
 
             if [[ "$STATE" == "VM running" ]]; then
-              echo "VM is running."
+              echo "VM reboot completed successfully."
               exit 0
             fi
 
-            sleep 20
+            sleep 30
           done
 
-          echo "ERROR: VM did not reach 'running' state in time."
+          echo "ERROR: VM did not return to running state after reboot."
           exit 1
 
       # -------------------------------------------------
-      # Phase 2: Run Command（パスワードリセット + Paging 設定）
+      # Phase 2-2: Run Command（Post-Reboot）
+      # ・Windows Update 完了確認
       # -------------------------------------------------
-      - name: Run Command - Configure OS State
+      - name: Run Command - Post Reboot (Windows Update Verification)
         shell: bash
         run: |
-          set -e
-
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
-
           az deployment group create \
             --resource-group "${{ inputs.resourceGroupName }}" \
-            --template-file infra/vm/runcommand-configure-os-state.bicep \
+            --template-file infra/vm/runcommand-windowsupdate-postreboot.bicep \
             --parameters \
               location="${{ inputs.location }}" \
-              vmName="${VM_BASE_NAME}" \
-              adminPassword="${{ inputs.adminPassword }}"
+              vmName="${{ steps.setvm.outputs.vmName }}"
