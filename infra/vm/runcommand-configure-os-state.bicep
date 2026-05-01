@@ -4,90 +4,73 @@ param location string
 @description('Target virtual machine name')
 param vmName string
 
-@description('Local administrator username (must already exist)')
+@description('Local administrator username')
 param adminUsername string = 'avdlocaladmin'
 
 @secure()
-@description('New password for local administrator user')
+@description('Local administrator password')
 param adminPassword string
 
-/*
- * Existing Virtual Machine
- */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
   name: vmName
 }
 
-/*
- * Run Command
- * - Reset local admin password
- * - Configure paging file
- * - Save logs to C:\WindowsAzure\Logs
- */
 resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'ConfigureOsState'
+  name: 'ConfigureOsState-PreReboot'
   parent: vm
   location: location
   properties: {
     parameters: [
-      {
-        name: 'adminUsername'
-        value: adminUsername
-      }
-      {
-        name: 'adminPassword'
-        value: adminPassword
-      }
+      { name: 'adminUsername' value: adminUsername }
+      { name: 'adminPassword' value: adminPassword }
     ]
     source: {
       script: '''
 param(
-  [Parameter(Mandatory)]
   [string]$adminUsername,
-
-  [Parameter(Mandatory)]
   [string]$adminPassword
 )
 
 $logDir  = "C:\WindowsAzure\Logs"
-$logFile = "$logDir\ConfigureOsState.log"
-
+$logFile = "$logDir\ConfigureOsState-PreReboot.log"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Start-Transcript -Path $logFile -Append
 
-$now    = (Get-Date -Format u)
-$vmName = $env:COMPUTERNAME
+Write-Output "=== PRE-REBOOT PHASE START ==="
+Write-Output "Timestamp (UTC): $(Get-Date -Format u)"
+Write-Output "Target VM      : $env:COMPUTERNAME"
+Write-Output "Target User    : $adminUsername"
 
-Write-Output "START Configure OS State"
-Write-Output "Timestamp (UTC): $now"
-Write-Output "Target VM      : $vmName"
-Write-Output "Execution User : SYSTEM (Azure Run Command)"
-
-# ---- Password reset ----
-Write-Output "Password reset initiated."
-Write-Output "Target local user : $adminUsername"
-Write-Output "Password value    : ****** (masked)"
-
+# Password reset
 net user $adminUsername $adminPassword
-Write-Output "Password reset result: SUCCESS"
+Write-Output "Password reset completed."
 
-# ---- Paging file configuration ----
-Write-Output "Configuring paging file..."
-
+# Paging file
 Set-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'PagingFiles' `
-  -Value 'C:\pagefile.sys 4096 8192'
+ -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+ -Name 'PagingFiles' `
+ -Value 'C:\pagefile.sys 4096 8192'
 
 Remove-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'TempPageFile' `
-  -ErrorAction SilentlyContinue
+ -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+ -Name 'TempPageFile' `
+ -ErrorAction SilentlyContinue
 
-Write-Output "Paging file configuration updated."
-Write-Output "END Configure OS State"
+Write-Output "Paging file configured."
 
+# Windows Update
+if (-not (Get-Module -ListAvailable PSWindowsUpdate)) {
+  Install-PackageProvider -Name NuGet -Force
+  Install-Module PSWindowsUpdate -Force -Confirm:$false
+}
+Import-Module PSWindowsUpdate
+
+Write-Output "Installing Windows Updates..."
+Install-WindowsUpdate -AcceptAll -IgnoreReboot -Verbose
+
+Write-Output "Rebooting system..."
 Stop-Transcript
+Restart-Computer -Force
 '''
     }
   }
