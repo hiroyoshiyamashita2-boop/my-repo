@@ -29,31 +29,40 @@ resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runComman
   parent: vm
   location: location
   properties: {
+
+    // ★★★ ここが重要：parameters として明示的に渡す ★★★
+    parameters: [
+      {
+        name: 'adminUsername'
+        value: adminUsername
+      }
+      {
+        name: 'adminPassword'
+        value: adminPassword
+      }
+    ]
+
     source: {
       script: '''
 $logDir  = "C:\WindowsAzure\Logs"
 $logFile = "$logDir\ConfigureOsState.log"
 
-# Ensure log directory exists
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-
 Start-Transcript -Path $logFile -Append
 
 Write-Output "START Configure OS State: $(Get-Date -Format u)"
 
-# --- Local admin password reset ---
+# RunCommand parameters are exposed as variables
 Write-Output "Resetting local administrator password..."
-net user ${adminUsername} "${adminPassword}"
+net user $adminUsername $adminPassword
 Write-Output "Local administrator password reset completed."
 
-# --- Configure paging file ---
 Write-Output "Configuring paging file..."
 Set-ItemProperty `
   -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
   -Name 'PagingFiles' `
   -Value 'C:\pagefile.sys 4096 8192'
 
-# Remove TempPageFile if exists
 Remove-ItemProperty `
   -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
   -Name 'TempPageFile' `
