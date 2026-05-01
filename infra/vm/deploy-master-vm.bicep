@@ -1,69 +1,120 @@
 @description('Azure region')
 param location string
 
-@description('Target virtual machine name')
+@description('Snapshot name to create OS disk from')
+param snapshotName string
+
+@description('Virtual Machine name')
 param vmName string
 
-@description('Local administrator username (must already exist)')
-param adminUsername string = 'avdlocaladmin'
+@description('Deployment date (YYYYMMDD)')
+param deployDate string
 
-@secure()
-@description('New password for local administrator user')
-param adminPassword string
+@description('Virtual Machine size')
+param vmSize string = 'Standard_D2s_v5'
+
+@description('Existing virtual network name')
+param vnetName string = 'P906VNJWPB01'
+
+@description('Existing subnet name')
+param subnetName string = 'AVD-MNG-JW'
+
+var osDiskName = '${vmName}-OsDisk01-${deployDate}'
 
 /*
- * Existing Virtual Machine
+ * Existing Virtual Network
  */
-resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
-  name: vmName
+resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
+  name: vnetName
 }
 
 /*
- * Run Command
- * - Reset local admin password
- * - Configure paging file
- * - Save logs to C:\WindowsAzure\Logs
+ * Existing Subnet
  */
-resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
-  name: 'ConfigureOsState'
-  parent: vm
+resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing = {
+  parent: vnet
+  name: subnetName
+}
+
+/*
+ * Existing Snapshot
+ */
+resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
+  name: snapshotName
+}
+
+/*
+ * OS Disk (Snapshot -> Managed Disk)
+ */
+resource osDisk 'Microsoft.Compute/disks@2023-10-02' = {
+  name: osDiskName
+  location: location
+  sku: {
+    name: 'StandardSSD_LRS'
+  }
+  properties: {
+    creationData: {
+      createOption: 'Copy'
+      sourceResourceId: snapshot.id
+    }
+    osType: 'Windows'
+  }
+}
+
+/*
+ * Network Interface
+ */
+resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
+  name: '${vmName}-nic'
   location: location
   properties: {
-    source: {
-      script: '''
-$logDir  = "C:\WindowsAzure\Logs"
-$logFile = "$logDir\ConfigureOsState.log"
+    ipConfigurations: [
+      {
+        name: 'ipconfig1'
+        properties: {
+          subnet: {
+            id: subnet.id
+          }
+          privateIPAllocationMethod: 'Dynamic'
+        }
+      }
+    ]
+  }
+}
 
-# Ensure log directory exists
-New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-
-Start-Transcript -Path $logFile -Append
-
-Write-Output "START Configure OS State: $(Get-Date -Format u)"
-
-# --- Local admin password reset ---
-Write-Output "Resetting local administrator password..."
-net user ${adminUsername} "${adminPassword}"
-Write-Output "Local administrator password reset completed."
-
-# --- Configure paging file ---
-Write-Output "Configuring paging file..."
-Set-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'PagingFiles' `
-  -Value 'C:\pagefile.sys 4096 8192'
-
-# Remove TempPageFile if exists
-Remove-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'TempPageFile' `
-  -ErrorAction SilentlyContinue
-
-Write-Output "Paging file configuration updated."
-Write-Output "END Configure OS State: $(Get-Date -Format u)"
-
-Stop-Transcript
-'''
+/*
+ * Virtual Machine (Trusted Launch, OS Disk Attach)
+ */
+resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
+  name: vmName
+  location: location
+  properties: {
+    hardwareProfile: {
+      vmSize: vmSize
+    }
+    securityProfile: {
+      securityType: 'TrustedLaunch'
+      uefiSettings: {
+        secureBootEnabled: true
+        vTpmEnabled: true
+      }
+    }
+    storageProfile: {
+      osDisk: {
+        name: osDiskName
+        createOption: 'Attach'
+        managedDisk: {
+          id: osDisk.id
+        }
+        osType: 'Windows'
+      }
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: nic.id
+        }
+      ]
     }
   }
 }
