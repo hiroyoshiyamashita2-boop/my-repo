@@ -20,10 +20,18 @@ resource configureOsStateRunCommand 'Microsoft.Compute/virtualMachines/runComman
   parent: vm
   location: location
   properties: {
+
     parameters: [
-      { name: 'adminUsername' value: adminUsername }
-      { name: 'adminPassword' value: adminPassword }
+      {
+        name: 'adminUsername'
+        value: adminUsername
+      }
+      {
+        name: 'adminPassword'
+        value: adminPassword
+      }
     ]
+
     source: {
       script: '''
 param(
@@ -41,11 +49,9 @@ Write-Output "Timestamp (UTC): $(Get-Date -Format u)"
 Write-Output "Target VM      : $env:COMPUTERNAME"
 Write-Output "Target User    : $adminUsername"
 
-# Password reset
 net user $adminUsername $adminPassword
 Write-Output "Password reset completed."
 
-# Paging file
 Set-ItemProperty `
  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
  -Name 'PagingFiles' `
@@ -64,8 +70,6 @@ if (-not (Get-Module -ListAvailable PSWindowsUpdate)) {
   Install-Module PSWindowsUpdate -Force -Confirm:$false
 }
 Import-Module PSWindowsUpdate
-
-Write-Output "Installing Windows Updates..."
 Install-WindowsUpdate -AcceptAll -IgnoreReboot -Verbose
 
 Write-Output "Rebooting system..."
