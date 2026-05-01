@@ -23,17 +23,6 @@ on:
         required: true
         type: string
 
-      adminUsername:
-        description: 'Existing local admin username in snapshot'
-        required: true
-        default: avdlocaladmin
-        type: string
-
-      adminPassword:
-        description: 'New password to reset existing local admin user'
-        required: true
-        type: string
-
 permissions:
   id-token: write
   contents: read
@@ -43,11 +32,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Azure Login (OIDC)
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -55,31 +42,25 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 3. 既存 VM の存在チェック
       - name: Check existing VM
         shell: bash
         run: |
           set -e
-
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          RESOURCE_GROUP="${{ inputs.resourceGroupName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+          VM_BASE_NAME="${{ inputs.snapshotName%%-* }}"
 
           if az vm show \
-            --resource-group "${RESOURCE_GROUP}" \
+            --resource-group "${{ inputs.resourceGroupName }}" \
             --name "${VM_BASE_NAME}" \
-            --query "name" \
+            --query name \
             --output tsv > /dev/null 2>&1; then
             echo "ERROR: VM '${VM_BASE_NAME}' already exists."
             exit 1
           fi
 
-      # 4. Bicep Deploy
       - name: Deploy Master VM with Bicep
         shell: bash
         run: |
-          SNAPSHOT_NAME="${{ inputs.snapshotName }}"
-          VM_BASE_NAME="${SNAPSHOT_NAME%%-*}"
+          VM_BASE_NAME="${{ inputs.snapshotName%%-* }}"
 
           az deployment group create \
             --resource-group "${{ inputs.resourceGroupName }}" \
@@ -88,6 +69,4 @@ jobs:
               location="${{ inputs.location }}" \
               snapshotName="${{ inputs.snapshotName }}" \
               vmName="${VM_BASE_NAME}" \
-              deployDate="${{ inputs.deployDate }}" \
-              adminUsername="${{ inputs.adminUsername }}" \
-              adminPassword="${{ inputs.adminPassword }}"
+              deployDate="${{ inputs.deployDate }}"
