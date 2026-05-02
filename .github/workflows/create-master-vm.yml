@@ -48,7 +48,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # -------------------------------------------------
-      # VM 名を snapshotName から決定
+      # VM 名を snapshotName から導出
       # -------------------------------------------------
       - name: Derive VM name from snapshot name
         id: derive
@@ -101,11 +101,10 @@ jobs:
 
             sleep 30
           done
-
           exit 1
 
       # -------------------------------------------------
-      # Phase 2-1: Pre-Reboot RunCommand（★ デプロイ名を一意化）
+      # Phase 2-1: Pre-Reboot RunCommand + ARM Restart
       # -------------------------------------------------
       - name: Run Command - Pre Reboot
         shell: bash
@@ -120,7 +119,7 @@ jobs:
               adminPassword="${{ inputs.adminPassword }}"
 
       # -------------------------------------------------
-      # 再起動待ち
+      # 再起動完了待ち（冪等ガード）
       # -------------------------------------------------
       - name: Wait for VM reboot completion
         shell: bash
@@ -140,11 +139,10 @@ jobs:
 
             sleep 30
           done
-
           exit 1
 
       # -------------------------------------------------
-      # Phase 2-2: Post-Reboot RunCommand（★ デプロイ名を一意化）
+      # Phase 2-2: Post-Reboot RunCommand（完了判定）
       # -------------------------------------------------
       - name: Run Command - Post Reboot
         shell: bash
