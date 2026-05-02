@@ -57,26 +57,20 @@ net user $adminUsername $adminPassword
 Write-Output "Local administrator password updated."
 
 #--------------------------------------------------
-# Paging file DISABLE & DELETE (重要)
+# Paging file DISABLE & DELETE（RunCommand 安定版）
 #--------------------------------------------------
 Write-Output "Disabling and removing paging file..."
 
 # 自動管理を無効化
-wmic computersystem where name="%COMPUTERNAME%" set AutomaticManagedPagefile=False
+wmic computersystem where name="%COMPUTERNAME%" set AutomaticManagedPagefile=False | Out-Null
 
-# PagingFiles を空に設定（完全無効化）
-Set-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'PagingFiles' `
-  -Value @()
+# PagingFiles を完全に無効化（1行指定）
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @()
 
 # 一時ページング設定を削除
-Remove-ItemProperty `
-  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
-  -Name 'TempPageFile' `
-  -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'TempPageFile' -ErrorAction SilentlyContinue
 
-# 既存 pagefile.sys を削除
+# pagefile.sys 実体削除
 if (Test-Path 'C:\pagefile.sys') {
   Remove-Item 'C:\pagefile.sys' -Force
   Write-Output "pagefile.sys removed."
@@ -114,8 +108,10 @@ Write-Output "Triggering Windows Update via UsoClient (GUI equivalent)..."
 
 usoclient StartScan
 Start-Sleep -Seconds 30
+
 usoclient StartDownload
 Start-Sleep -Seconds 30
+
 usoclient StartInstall
 
 Write-Output "UsoClient update commands issued."
