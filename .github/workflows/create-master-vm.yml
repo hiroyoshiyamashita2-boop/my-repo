@@ -26,7 +26,7 @@ on:
       adminPassword:
         description: 'Local administrator password'
         required: true
-        type: string   # GitHub UI ではマスクされません（仕様）
+        type: string
 
 permissions:
   id-token: write
@@ -58,36 +58,20 @@ jobs:
           VM_NAME="${SNAPSHOT_NAME%%-*}"
 
           if [[ -z "$VM_NAME" ]]; then
-            echo "ERROR: Failed to derive VM name from snapshotName."
+            echo "ERROR: Failed to derive VM name."
             exit 1
           fi
 
-          echo "Derived VM name: $VM_NAME"
           echo "vmName=$VM_NAME" >> $GITHUB_OUTPUT
 
       # -------------------------------------------------
-      # 事前チェック：VM が存在したら異常
+      # Phase 1: VM 作成
       # -------------------------------------------------
-      - name: Verify VM does not already exist
-        shell: bash
-        run: |
-          if az vm show \
-            --resource-group "${{ inputs.resourceGroupName }}" \
-            --name "${{ steps.derive.outputs.vmName }}" \
-            --query name -o tsv >/dev/null 2>&1; then
-            echo "ERROR: VM '${{ steps.derive.outputs.vmName }}' already exists."
-            exit 1
-          fi
-
-          echo "VM does not exist. OK to proceed."
-
-      # -------------------------------------------------
-      # Phase 1: Master VM 作成
-      # -------------------------------------------------
-      - name: Deploy Master VM with Bicep
+      - name: Deploy Master VM
         shell: bash
         run: |
           az deployment group create \
+            --name "deploy-master-vm-${{ inputs.deployDate }}" \
             --resource-group "${{ inputs.resourceGroupName }}" \
             --template-file infra/vm/deploy-master-vm.bicep \
             --parameters \
@@ -97,13 +81,11 @@ jobs:
               deployDate="${{ inputs.deployDate }}"
 
       # -------------------------------------------------
-      # VM 起動待ち
+      # 起動待ち
       # -------------------------------------------------
       - name: Wait for VM to be running
         shell: bash
         run: |
-          echo "Waiting for VM startup..."
-
           for i in {1..40}; do
             STATE=$(az vm get-instance-view \
               --resource-group "${{ inputs.resourceGroupName }}" \
@@ -114,23 +96,22 @@ jobs:
             echo "Current VM state: $STATE"
 
             if [[ "$STATE" == "VM running" ]]; then
-              echo "VM is running."
               exit 0
             fi
 
             sleep 30
           done
 
-          echo "ERROR: VM did not reach running state."
           exit 1
 
       # -------------------------------------------------
-      # Phase 2-1: Run Command（Pre-Reboot）
+      # Phase 2-1: Pre-Reboot RunCommand（★ デプロイ名を一意化）
       # -------------------------------------------------
-      - name: Run Command - Pre Reboot (Configure OS + Windows Update)
+      - name: Run Command - Pre Reboot
         shell: bash
         run: |
           az deployment group create \
+            --name "runcommand-pre-${{ inputs.deployDate }}" \
             --resource-group "${{ inputs.resourceGroupName }}" \
             --template-file infra/vm/runcommand-configure-os-state.bicep \
             --parameters \
@@ -139,13 +120,11 @@ jobs:
               adminPassword="${{ inputs.adminPassword }}"
 
       # -------------------------------------------------
-      # 再起動待ち（Windows Update 後）
+      # 再起動待ち
       # -------------------------------------------------
       - name: Wait for VM reboot completion
         shell: bash
         run: |
-          echo "Waiting for VM reboot..."
-
           for i in {1..40}; do
             STATE=$(az vm get-instance-view \
               --resource-group "${{ inputs.resourceGroupName }}" \
@@ -156,23 +135,22 @@ jobs:
             echo "Current VM state: $STATE"
 
             if [[ "$STATE" == "VM running" ]]; then
-              echo "VM reboot completed."
               exit 0
             fi
 
             sleep 30
           done
 
-          echo "ERROR: VM did not return to running state after reboot."
           exit 1
 
       # -------------------------------------------------
-      # Phase 2-2: Run Command（Post-Reboot）
+      # Phase 2-2: Post-Reboot RunCommand（★ デプロイ名を一意化）
       # -------------------------------------------------
-      - name: Run Command - Post Reboot (Windows Update Verification)
+      - name: Run Command - Post Reboot
         shell: bash
         run: |
           az deployment group create \
+            --name "runcommand-post-${{ inputs.deployDate }}" \
             --resource-group "${{ inputs.resourceGroupName }}" \
             --template-file infra/vm/runcommand-windowsupdate-postreboot.bicep \
             --parameters \
@@ -180,15 +158,11 @@ jobs:
               vmName="${{ steps.derive.outputs.vmName }}"
 
       # -------------------------------------------------
-      # Phase 3: 完了後に VM を Stop（Deallocate）
+      # Phase 3: Deallocate
       # -------------------------------------------------
-      - name: Stop and Deallocate VM after successful completion
+      - name: Stop and Deallocate VM
         shell: bash
         run: |
-          echo "Deallocating VM after successful OS configuration..."
-
           az vm deallocate \
             --resource-group "${{ inputs.resourceGroupName }}" \
             --name "${{ steps.derive.outputs.vmName }}"
-
-          echo "VM successfully deallocated."
