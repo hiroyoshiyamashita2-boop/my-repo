@@ -23,45 +23,85 @@ $logFile = "$logDir\PostReboot.log"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Start-Transcript -Path $logFile -Append
 
-Write-Output "=== POST-REBOOT START ==="
+Write-Output "=== POST-REBOOT WINDOWS UPDATE VALIDATION ==="
 Write-Output "Timestamp (UTC): $(Get-Date -Format u)"
 Write-Output "Computer       : $env:COMPUTERNAME"
 
 #--------------------------------------------------
-# Pending reboot check
+# Pending reboot detection function
 #--------------------------------------------------
-$pending = $false
+function Test-PendingReboot {
 
-$paths = @(
-  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-)
+  $paths = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+  )
 
-foreach ($path in $paths) {
-  if (Test-Path $path) {
-    $pending = $true
-    Write-Output "Pending reboot detected: $path"
+  foreach ($path in $paths) {
+    if (Test-Path $path) {
+      Write-Output "Pending reboot detected: $path"
+      return $true
+    }
   }
-}
 
-if ($pending) {
-  Write-Output "WARNING: System still requires reboot."
-} else {
-  Write-Output "No pending reboot detected."
+  $pfro = Get-ItemProperty `
+    'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
+    -Name PendingFileRenameOperations `
+    -ErrorAction SilentlyContinue
+
+  if ($pfro) {
+    Write-Output "PendingFileRenameOperations detected."
+    return $true
+  }
+
+  return $false
 }
 
 #--------------------------------------------------
-# Completion marker (C:\WindowsAzure\Logs)
+# Windows Update remaining check
+#--------------------------------------------------
+try {
+  Import-Module PSWindowsUpdate -ErrorAction Stop
+} catch {
+  Write-Error "PSWindowsUpdate module not available."
+  Stop-Transcript
+  exit 1
+}
+
+Write-Output "Checking remaining Windows Updates..."
+
+$remainingUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot -Verbose
+
+#--------------------------------------------------
+# Strict validation
+#--------------------------------------------------
+$pendingReboot = Test-PendingReboot
+
+if ($pendingReboot) {
+  Write-Error "System still requires reboot. Windows Update NOT completed."
+  Stop-Transcript
+  exit 1
+}
+
+if ($remainingUpdates.Count -gt 0) {
+  Write-Error "Remaining Windows Updates detected. Count: $($remainingUpdates.Count)"
+  Stop-Transcript
+  exit 1
+}
+
+#--------------------------------------------------
+# Completion marker (success only)
 #--------------------------------------------------
 $markerFile = "$logDir\MasterVmCompleted.txt"
 Set-Content `
   -Path $markerFile `
-  -Value "Master VM provisioning completed at $(Get-Date -Format u)"
+  -Value "Master VM provisioning completed successfully at $(Get-Date -Format u)"
 
 Write-Output "Completion marker created: $markerFile"
+Write-Output "POST-REBOOT VALIDATION SUCCESSFUL"
 
-Write-Output "Post-reboot configuration completed successfully."
 Stop-Transcript
+exit 0
 '''
     }
   }
