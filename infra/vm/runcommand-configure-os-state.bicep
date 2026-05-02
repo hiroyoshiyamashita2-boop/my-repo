@@ -8,7 +8,7 @@ param vmName string
 @description('Local administrator password')
 param adminPassword string
 
-// 固定ローカル管理者名（YAML 側では渡さない前提）
+// 固定ローカル管理者名
 var adminUsername = 'avdlocaladmin'
 
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
@@ -72,9 +72,9 @@ Remove-ItemProperty `
 Write-Output "Paging file configured."
 
 #--------------------------------------------------
-# Windows Update (PowerShell 5.1 に明示的に切り替え)
+# Windows Update (PSWindowsUpdate / PowerShell 5.1)
 #--------------------------------------------------
-Write-Output "Starting Windows Update using Windows PowerShell 5.1..."
+Write-Output "Starting Windows Update using PSWindowsUpdate (PowerShell 5.1)..."
 
 $wuScript = @'
 $ProgressPreference = "SilentlyContinue"
@@ -88,10 +88,27 @@ Import-Module PSWindowsUpdate
 Install-WindowsUpdate -AcceptAll -IgnoreReboot -Verbose
 '@
 
-# ★ ここで PowerShell 5.1 (powershell.exe) を起動
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $wuScript
 
-Write-Output "Windows Update completed."
+Write-Output "PSWindowsUpdate completed."
+
+#--------------------------------------------------
+# Windows Update (GUI equivalent: UsoClient)
+#--------------------------------------------------
+Write-Output "Triggering Windows Update via UsoClient (GUI equivalent)..."
+
+usoclient StartScan
+Write-Output "UsoClient StartScan issued."
+Start-Sleep -Seconds 30
+
+usoclient StartDownload
+Write-Output "UsoClient StartDownload issued."
+Start-Sleep -Seconds 30
+
+usoclient StartInstall
+Write-Output "UsoClient StartInstall issued."
+
+Write-Output "UsoClient update commands completed."
 
 #--------------------------------------------------
 # Reboot
