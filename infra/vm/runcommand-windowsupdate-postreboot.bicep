@@ -8,31 +8,59 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
   name: vmName
 }
 
-resource postRebootUpdateCheck 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
+resource postReboot 'Microsoft.Compute/virtualMachines/runCommands@2023-09-01' = {
   name: 'ConfigureOsState-PostReboot'
   parent: vm
   location: location
   properties: {
     source: {
       script: '''
+#--------------------------------------------------
+# Log setup
+#--------------------------------------------------
 $logDir  = "C:\WindowsAzure\Logs"
-$logFile = "$logDir\ConfigureOsState-PostReboot.log"
+$logFile = "$logDir\PostReboot.log"
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Start-Transcript -Path $logFile -Append
 
-Write-Output "=== POST-REBOOT PHASE START ==="
+Write-Output "=== POST-REBOOT START ==="
 Write-Output "Timestamp (UTC): $(Get-Date -Format u)"
+Write-Output "Computer       : $env:COMPUTERNAME"
 
-Import-Module PSWindowsUpdate
-$pending = Get-WindowsUpdate
+#--------------------------------------------------
+# Pending reboot check
+#--------------------------------------------------
+$pending = $false
 
-if ($pending.Count -eq 0) {
-  Write-Output "Windows Update completed successfully."
-} else {
-  Write-Output "Pending updates detected:"
-  $pending | Format-Table -AutoSize
+$paths = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+)
+
+foreach ($path in $paths) {
+  if (Test-Path $path) {
+    $pending = $true
+    Write-Output "Pending reboot detected: $path"
+  }
 }
 
-Write-Output "=== POST-REBOOT PHASE END ==="
+if ($pending) {
+  Write-Output "WARNING: System still requires reboot."
+} else {
+  Write-Output "No pending reboot detected."
+}
+
+#--------------------------------------------------
+# Completion marker (C:\WindowsAzure\Logs)
+#--------------------------------------------------
+$markerFile = "$logDir\MasterVmCompleted.txt"
+Set-Content `
+  -Path $markerFile `
+  -Value "Master VM provisioning completed at $(Get-Date -Format u)"
+
+Write-Output "Completion marker created: $markerFile"
+
+Write-Output "Post-reboot configuration completed successfully."
 Stop-Transcript
 '''
     }
