@@ -57,19 +57,34 @@ net user $adminUsername $adminPassword
 Write-Output "Local administrator password updated."
 
 #--------------------------------------------------
-# Paging file configuration
+# Paging file DISABLE & DELETE (重要)
 #--------------------------------------------------
+Write-Output "Disabling and removing paging file..."
+
+# 自動管理を無効化
+wmic computersystem where name="%COMPUTERNAME%" set AutomaticManagedPagefile=False
+
+# PagingFiles を空に設定（完全無効化）
 Set-ItemProperty `
- -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
- -Name 'PagingFiles' `
- -Value 'C:\pagefile.sys 4096 8192'
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  -Name 'PagingFiles' `
+  -Value @()
 
+# 一時ページング設定を削除
 Remove-ItemProperty `
- -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
- -Name 'TempPageFile' `
- -ErrorAction SilentlyContinue
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+  -Name 'TempPageFile' `
+  -ErrorAction SilentlyContinue
 
-Write-Output "Paging file configured."
+# 既存 pagefile.sys を削除
+if (Test-Path 'C:\pagefile.sys') {
+  Remove-Item 'C:\pagefile.sys' -Force
+  Write-Output "pagefile.sys removed."
+} else {
+  Write-Output "No pagefile.sys found."
+}
+
+Write-Output "Paging file configuration cleared."
 
 #--------------------------------------------------
 # Windows Update (PSWindowsUpdate / PowerShell 5.1)
@@ -98,17 +113,12 @@ Write-Output "PSWindowsUpdate completed."
 Write-Output "Triggering Windows Update via UsoClient (GUI equivalent)..."
 
 usoclient StartScan
-Write-Output "UsoClient StartScan issued."
 Start-Sleep -Seconds 30
-
 usoclient StartDownload
-Write-Output "UsoClient StartDownload issued."
 Start-Sleep -Seconds 30
-
 usoclient StartInstall
-Write-Output "UsoClient StartInstall issued."
 
-Write-Output "UsoClient update commands completed."
+Write-Output "UsoClient update commands issued."
 
 #--------------------------------------------------
 # Reboot
