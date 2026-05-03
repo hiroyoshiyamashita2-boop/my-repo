@@ -96,7 +96,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
 
-  // ✅ Azure Update Manager 用タグ
+  // Azure Update Manager 用タグ
   tags: {
     manualUpdate: 'true'      // Update Manager 対象
     role: 'avd-master'        // AVD マスター VM
