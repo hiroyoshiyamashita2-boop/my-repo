@@ -65,14 +65,12 @@ net user $adminUsername $adminPassword
 Write-Output "Local administrator password updated."
 
 #==================================================
-# Disable paging file (WMIC-free)
+# Disable paging file (CIM 正式手法)
 #==================================================
 Write-Output "Disabling automatic paging file management..."
 
-Set-CimInstance `
-  -Namespace root\\cimv2 `
-  -ClassName Win32_ComputerSystem `
-  -Property @{ AutomaticManagedPagefile = $false }
+Get-CimInstance -ClassName Win32_ComputerSystem -Namespace root\\cimv2 |
+  Set-CimInstance -Property @{ AutomaticManagedPagefile = $false }
 
 Set-ItemProperty `
   -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
