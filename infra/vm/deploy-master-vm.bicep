@@ -42,7 +42,6 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' existing 
 
 /*
  * Existing Snapshot
- * ※ Snapshot が別RGの場合は scope を追加
  */
 resource snapshot 'Microsoft.Compute/snapshots@2023-10-02' existing = {
   name: snapshotName
@@ -88,11 +87,22 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = {
 }
 
 /*
- * Virtual Machine (Trusted Launch, OS Disk Attach)
+ * Virtual Machine
+ * - Snapshot OS Disk Attach
+ * - Trusted Launch
+ * - Tags for Azure Update Manager
  */
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
   name: vmName
   location: location
+
+  // ✅ Azure Update Manager 用タグ
+  tags: {
+    manualUpdate: 'true'      // Update Manager 対象
+    role: 'avd-master'        // AVD マスター VM
+    lifecycle: 'image-prep'   // イメージ作成前段階
+  }
+
   properties: {
     hardwareProfile: {
       vmSize: vmSize
