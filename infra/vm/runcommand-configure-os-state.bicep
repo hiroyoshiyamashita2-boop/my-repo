@@ -49,8 +49,8 @@ $ErrorActionPreference = 'Stop'
 #==================================================
 # Log setup
 #==================================================
-$logDir  = "C:\\WindowsAzure\\Logs"
-$logFile = "$logDir\\ConfigureOsState.log"
+$logDir  = "C:\WindowsAzure\Logs"
+$logFile = "$logDir\ConfigureOsState.log"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Start-Transcript -Path $logFile -Append
 
@@ -69,21 +69,21 @@ Write-Output "Local administrator password updated."
 #==================================================
 Write-Output "Disabling automatic paging file management..."
 
-Get-CimInstance -ClassName Win32_ComputerSystem -Namespace root\\cimv2 |
+Get-CimInstance -ClassName Win32_ComputerSystem -Namespace root\cimv2 |
   Set-CimInstance -Property @{ AutomaticManagedPagefile = $false }
 
 Set-ItemProperty `
-  -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
   -Name 'PagingFiles' `
   -Value @()
 
 Remove-ItemProperty `
-  -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' `
+  -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
   -Name 'TempPageFile' `
   -ErrorAction SilentlyContinue
 
-if (Test-Path 'C:\\pagefile.sys') {
-  Remove-Item 'C:\\pagefile.sys' -Force
+if (Test-Path 'C:\pagefile.sys') {
+  Remove-Item 'C:\pagefile.sys' -Force
   Write-Output "pagefile.sys removed."
 } else {
   Write-Output "No pagefile.sys found."
